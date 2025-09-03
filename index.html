@@ -419,7 +419,10 @@
         }
         
         function animate() {
-            controls.update();
+            // *** 修正：只有在沒有拖曳物件時，才更新視角控制器 ***
+            if (!selectedObject) {
+                controls.update();
+            }
             renderer.render(scene, camera);
         }
 
