@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>3D人體骨骼拼圖 V2.0 (操作優化版)</title>
+    <title>3D人體骨骼拼圖 V3.0 (功能增強版)</title>
     <!-- 引入 Tailwind CSS 以進行快速樣式設計 -->
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
@@ -54,14 +54,26 @@
     <!-- 遊戲資訊面板 -->
     <div class="info-panel shadow-lg">
         <h1 class="text-2xl font-bold text-white">3D人體骨骼拼圖</h1>
-        <p id="instruction-text" class="text-gray-300 mt-1">將骨骼拖曳到中央骨架的正確位置上。</p>
-        <p id="bone-name-text" class="mt-3 text-xl text-cyan-300 font-semibold bone-name"></p>
+        
+        <!-- 新增：計時器 -->
+        <div class="mt-4 flex justify-between items-center text-lg">
+            <span class="text-gray-300">遊戲時間:</span>
+            <span id="timer-text" class="font-mono text-cyan-300 text-xl">00:00</span>
+        </div>
+
+        <!-- 修改：骨骼資訊顯示區 -->
+        <div id="bone-info-container" class="mt-4 p-3 bg-gray-900 bg-opacity-50 rounded-lg" style="min-height: 120px;">
+             <p id="bone-name-text" class="text-xl text-cyan-300 font-semibold bone-name"></p>
+             <p id="bone-description-text" class="text-gray-300 mt-1"></p>
+        </div>
     </div>
 
     <!-- 遊戲完成訊息 -->
     <div id="completion-message" class="absolute inset-0 z-20 flex-col items-center justify-center bg-black bg-opacity-80 text-white text-center">
         <h2 class="text-6xl font-bold mb-4 animate-pulse">恭喜！</h2>
         <p class="text-2xl mb-8">您已成功拼湊出完整的人體骨骼！</p>
+         <!-- 新增：顯示最終時間 -->
+        <p id="final-time-text" class="text-2xl mb-8"></p>
         <button id="play-again-button" class="bg-blue-600 hover-bg-blue-700 text-white font-bold py-3 px-8 rounded-lg text-xl button shadow-xl">
             再玩一次
         </button>
@@ -93,9 +105,8 @@
         let scene, camera, renderer, controls;
         let raycaster, mouse;
         let selectedObject = null;
-        let controller1, controller2; // VR 控制器
-        let controllerGrip1, controllerGrip2;
-        let gameGroup; // 用於容納所有遊戲物件的群組
+        let controller1, controller2, controllerGrip1, controllerGrip2;
+        let gameGroup;
         
         // --- 操作優化變數 ---
         const dragPlane = new THREE.Plane();
@@ -103,7 +114,12 @@
         let longPressTimeout = null;
         let isDragging = false;
         const pointerDownPosition = new THREE.Vector2();
+        const dragOffset = new THREE.Vector3();
 
+        // --- 新增：計時器變數 ---
+        let timerInterval = null;
+        let secondsElapsed = 0;
+        let gameStarted = false;
 
         const draggableObjects = [];
         const bonesData = [];
@@ -111,41 +127,44 @@
 
         // UI 元素
         const boneNameText = document.getElementById('bone-name-text');
+        const boneDescriptionText = document.getElementById('bone-description-text');
         const completionMessage = document.getElementById('completion-message');
         const resetButton = document.getElementById('reset-button');
         const playAgainButton = document.getElementById('play-again-button');
         const loadingOverlay = document.getElementById('loading-overlay');
+        const timerText = document.getElementById('timer-text');
+        const finalTimeText = document.getElementById('final-time-text');
         
         const sceneScaleFactor = 10;
-        const referencePosition = new THREE.Vector3(0, 15.5, 0);
+        const referencePosition = new THREE.Vector3(0, 12.5, 0); // 修正：將參考骨架稍微下移以對齊
 
-        // --- 骨骼資料定義 ---
+        // --- 新增：為骨骼資料加入描述 ---
         const boneDefinitions = [
-            { id: 'pelvis', name: '骨盆', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/pelvis.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(80, 0, 0), targetPos: new THREE.Vector3(0, 16, 0) },
-            { id: 'spinal_cord', name: '脊柱', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/spinal%20cord.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(0, -80, 0), targetPos: new THREE.Vector3(0, 36.5, -2) },
-            { id: 'chest', name: '胸腔', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/chest.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(0, 80, 0), targetPos: new THREE.Vector3(0, 44, 0) },
-            { id: 'skull', name: '頭骨', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/head.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(-80, 50, 0), targetPos: new THREE.Vector3(0, 70.5, -1) },
-            { id: 'humerus_l', name: '左肱骨', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/upperarm02.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(-95, 30, 0), targetPos: new THREE.Vector3(-11, 43.5, 0) },
-            { id: 'humerus_r', name: '右肱骨', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/upperarm.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(95, 30, 0), targetPos: new THREE.Vector3(11, 43.5, 0) },
-            { id: 'radius_ulna_l', name: '左前臂骨', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/forearm02.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(-95, -20, 0), targetPos: new THREE.Vector3(-22, 15, 0) },
-            { id: 'radius_ulna_r', name: '右前臂骨', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/forearm.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(95, -20, 0), targetPos: new THREE.Vector3(22, 15, 0) },
-            { id: 'femur_l', name: '左股骨', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/thighbone02.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(-80, -50, 0), targetPos: new THREE.Vector3(-8, 0.5, 0) },
-            { id: 'femur_r', name: '右股骨', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/thighbone.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(80, -50, 0), targetPos: new THREE.Vector3(8, 0.5, 0) },
-            { id: 'tibia_l', name: '左脛骨', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/calf%20bone%2002.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(-80, -80, 0), targetPos: new THREE.Vector3(-6, -34.5, 0) },
-            { id: 'tibia_r', name: '右脛骨', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/calf%20bone.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(80, -80, 0), targetPos: new THREE.Vector3(6, -34.5, 0) }
+            { id: 'pelvis', name: '骨盆', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/pelvis.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(80, 0, 0), targetPos: new THREE.Vector3(0, 16, 0), description: '保護腹腔器官，連接脊柱與下肢的橋樑。男女骨盆形狀不同，女性的更為寬闊以利生育。' },
+            { id: 'spinal_cord', name: '脊柱', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/spinal%20cord.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(0, -80, 0), targetPos: new THREE.Vector3(0, 38.5, -2), description: '由33塊椎骨組成，是支撐身體的核心。它不僅保護重要的脊髓神經，其S形曲線也提供了避震與平衡的功能。' },
+            { id: 'chest', name: '胸腔', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/chest.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(0, 100, 0), targetPos: new THREE.Vector3(0, 44, 0), description: '由12對肋骨、胸骨等組成，像盔甲一樣保護心臟與肺部。呼吸時，胸腔會擴張與收縮。' },
+            { id: 'skull', name: '頭骨', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/head.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(-80, 50, 0), targetPos: new THREE.Vector3(0, 70.5, -1), description: '由22塊骨頭組成，其中只有下頜骨可以活動。它像安全帽一樣，保護著身體最重要的器官—大腦。' },
+            { id: 'humerus_l', name: '左肱骨', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/upperarm02.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(-85, 30, 0), targetPos: new THREE.Vector3(-11, 43.5, 0), description: '上臂的單一長骨，連接肩部與肘部。它的球狀頂端與肩胛骨形成球窩關節，是人體活動範圍最大的關節。' },
+            { id: 'humerus_r', name: '右肱骨', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/upperarm.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(85, 30, 0), targetPos: new THREE.Vector3(11, 43.5, 0), description: '上臂的單一長骨，連接肩部與肘部。它的球狀頂端與肩胛骨形成球窩關節，是人體活動範圍最大的關節。' },
+            { id: 'radius_ulna_l', name: '左前臂骨', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/forearm02.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(-95, -20, 0), targetPos: new THREE.Vector3(-22, 15, 0), description: '由較粗的橈骨和較細的尺骨組成。這兩根骨頭的巧妙結構讓前臂與手腕能夠做出翻轉（旋前旋後）的動作。' },
+            { id: 'radius_ulna_r', name: '右前臂骨', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/forearm.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(95, -20, 0), targetPos: new THREE.Vector3(22, 15, 0), description: '由較粗的橈骨和較細的尺骨組成。這兩根骨頭的巧妙結構讓前臂與手腕能夠做出翻轉（旋前旋後）的動作。' },
+            { id: 'femur_l', name: '左股骨', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/thighbone02.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(-80, -50, 0), targetPos: new THREE.Vector3(-8, 0.5, 0), description: '人體中最長、最重、最堅固的骨骼，位於大腿。它能承受相當於體重30倍的壓力，是支撐與行走的核心。' },
+            { id: 'femur_r', name: '右股骨', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/thighbone.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(80, -50, 0), targetPos: new THREE.Vector3(8, 0.5, 0), description: '人體中最長、最重、最堅固的骨骼，位於大腿。它能承受相當於體重30倍的壓力，是支撐與行走的核心。' },
+            { id: 'tibia_l', name: '左脛骨', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/calf%20bone%2002.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(-80, -80, 0), targetPos: new THREE.Vector3(-6, -34.5, 0), description: '小腿前側較粗的骨骼，俗稱「迎面骨」，主要負責承受體重。它與較細的腓骨共同構成小腿骨架。' },
+            { id: 'tibia_r', name: '右脛骨', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/calf%20bone.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(80, -80, 0), targetPos: new THREE.Vector3(6, -34.5, 0), description: '小腿前側較粗的骨骼，俗稱「迎面骨」，主要負責承受體重。它與較細的腓骨共同構成小腿骨架。' }
         ];
         
         init();
 
         function init() {
             scene = new THREE.Scene();
-            
             gameGroup = new THREE.Group();
             gameGroup.position.z = -80; 
             scene.add(gameGroup);
 
+            // 修正：更換為更有氣氛的深色房間背景
             new THREE.TextureLoader().load(
-                'https://live.staticflickr.com/65535/49333912182_a231368962_k.jpg',
+                'https://live.staticflickr.com/65535/51694358825_31da29497d_k.jpg', // 修正：更換為一個絕對穩定的背景連結
                 (texture) => {
                     texture.mapping = THREE.EquirectangularReflectionMapping;
                     scene.background = texture;
@@ -162,15 +181,15 @@
             document.body.appendChild(renderer.domElement);
             document.body.appendChild(VRButton.createButton(renderer));
 
-            const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+            // 修正：配合場景調整光線，增強氣氛
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
             scene.add(ambientLight);
-            const directionalLight = new THREE.DirectionalLight(0xffffff, 1.2);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0);
             directionalLight.position.set(50, 100, 75);
             scene.add(directionalLight);
             
             controls = new OrbitControls(camera, renderer.domElement);
             controls.enableDamping = true;
-            // 優化：讓鏡頭圍繞骨架中心旋轉，而不是世界中心
             controls.target.copy(referencePosition).add(gameGroup.position);
             
             raycaster = new THREE.Raycaster();
@@ -191,8 +210,29 @@
             resetButton.addEventListener('click', resetGame);
             playAgainButton.addEventListener('click', resetGame);
             
+            // 初始化說明文字
+            boneDescriptionText.textContent = '將骨骼拖曳到中央的正確位置。';
+
             renderer.setAnimationLoop(animate);
         }
+
+        // --- 新增：計時器相關函式 ---
+        function startTimer() {
+            if (timerInterval) return; 
+            secondsElapsed = 0;
+            timerInterval = setInterval(() => {
+                secondsElapsed++;
+                const minutes = Math.floor(secondsElapsed / 60).toString().padStart(2, '0');
+                const seconds = (secondsElapsed % 60).toString().padStart(2, '0');
+                timerText.textContent = `${minutes}:${seconds}`;
+            }, 1000);
+        }
+
+        function stopTimer() {
+            clearInterval(timerInterval);
+            timerInterval = null;
+        }
+
 
         function setupVRControllers() {
             controller1 = renderer.xr.getController(0);
@@ -200,22 +240,25 @@
             controller1.addEventListener('selectend', onSelectEnd);
             scene.add(controller1);
 
+            controllerGrip1 = renderer.xr.getControllerGrip(0);
+            const model1 = new THREE.Line(
+                new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -1)]),
+                new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 2 })
+            );
+            controllerGrip1.add(model1);
+            scene.add(controllerGrip1);
+
             controller2 = renderer.xr.getController(1);
             controller2.addEventListener('selectstart', onSelectStart);
             controller2.addEventListener('selectend', onSelectEnd);
             scene.add(controller2);
 
-            const controllerModelFactory = new THREE.Line(
+            controllerGrip2 = renderer.xr.getControllerGrip(1);
+            const model2 = new THREE.Line(
                 new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -1)]),
                 new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 2 })
             );
-
-            controllerGrip1 = renderer.xr.getControllerGrip(0);
-            controllerGrip1.add(controllerModelFactory.clone());
-            scene.add(controllerGrip1);
-
-            controllerGrip2 = renderer.xr.getControllerGrip(1);
-            controllerGrip2.add(controllerModelFactory.clone());
+            controllerGrip2.add(model2);
             scene.add(controllerGrip2);
         }
 
@@ -225,11 +268,15 @@
 
             if (intersections.length > 0) {
                 let object = intersections[0].object;
-                while (object.parent && !object.userData.type) {
-                    object = object.parent;
-                }
+                while (object.parent && !object.userData.type) { object = object.parent; }
                 if (object.userData.type === 'draggable' && !object.userData.placed) {
+                    if (!gameStarted) {
+                        startTimer();
+                        gameStarted = true;
+                    }
                     selectedObject = object;
+                    boneNameText.textContent = selectedObject.userData.name;
+                    boneDescriptionText.textContent = selectedObject.userData.description;
                     controller.attach(selectedObject);
                 }
             }
@@ -238,11 +285,9 @@
         function onSelectEnd(event) {
             if (selectedObject) {
                 gameGroup.attach(selectedObject);
-                
                 const targetPos = selectedObject.userData.targetPos;
                 const distance = selectedObject.position.distanceTo(targetPos);
-
-                if (distance < 40) { // VR吸附範圍
+                if (distance < 40) {
                     selectedObject.position.copy(targetPos);
                     selectedObject.userData.placed = true;
                     selectedObject.material.color.set(0x50c878);
@@ -254,28 +299,24 @@
             }
         }
         
-        // 優化：VR控制器的視覺回饋
-        function handleController(controller) {
-            if (controller.visible) {
+        function handleController(controller, grip) {
+            if (controller.visible && grip) {
+                const line = grip.getObjectByProperty('type', 'Line');
+                if (!line) return; 
                 const intersections = getIntersections(controller);
-                const line = controller.getObjectByProperty('type', 'Line');
-                
                 if (intersections.length > 0) {
                      let object = intersections[0].object;
-                     while (object.parent && !object.userData.type) {
-                        object = object.parent;
-                     }
+                     while (object.parent && !object.userData.type) { object = object.parent; }
                     if(object.userData.type === 'draggable' && !object.userData.placed){
-                        line.material.color.set(0x00ff00); // 綠色表示可選取
+                        line.material.color.set(0x00ff00);
                     } else {
-                        line.material.color.set(0xffffff); // 白色
+                        line.material.color.set(0xffffff);
                     }
                 } else {
-                    line.material.color.set(0xffffff); // 白色
+                    line.material.color.set(0xffffff);
                 }
             }
         }
-
 
         function getIntersections(controller) {
             const tempMatrix = new THREE.Matrix4();
@@ -287,33 +328,22 @@
         
         function modelLoaded() {
             modelsToLoad--;
-            if (modelsToLoad <= 0) {
-                loadingOverlay.style.display = 'none';
-            }
+            if (modelsToLoad <= 0) { loadingOverlay.style.display = 'none'; }
         }
 
         function loadFullSkeletonReference() {
             modelsToLoad++;
             const loader = new STLLoader();
             const modelUrl = 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/untitled.stl';
-            
             loader.load(modelUrl, (geometry) => {
-                const material = new THREE.MeshStandardMaterial({ 
-                    color: 0x00ffff,
-                    transparent: true,
-                    opacity: 0.25,
-                    metalness: 0.2,
-                    roughness: 0.8
-                });
+                const material = new THREE.MeshStandardMaterial({ color: 0x00ffff, transparent: true, opacity: 0.25, metalness: 0.2, roughness: 0.8 });
                 geometry.computeBoundingBox();
                 const center = geometry.boundingBox.getCenter(new THREE.Vector3());
                 geometry.translate(-center.x, -center.y, -center.z);
-
                 const mesh = new THREE.Mesh(geometry, material);
                 mesh.scale.set(0.35 * sceneScaleFactor, 0.35 * sceneScaleFactor, 0.35 * sceneScaleFactor);
                 mesh.position.copy(referencePosition); 
                 mesh.rotation.x = -Math.PI / 2;
-                
                 gameGroup.add(mesh);
                 modelLoaded();
             }, undefined, (error) => {
@@ -328,20 +358,13 @@
                 modelsToLoad++;
                 const url = def.modelUrl.replace(/ /g, '%20');
                 stlLoader.load(url, (geometry) => {
-                    const material = new THREE.MeshStandardMaterial({ 
-                        color: 0xebe5d1,
-                        metalness: 0.3,
-                        roughness: 0.6
-                    });
-                    
+                    const material = new THREE.MeshStandardMaterial({ color: 0xebe5d1, metalness: 0.3, roughness: 0.6 });
                     geometry.computeBoundingBox();
                     const center = geometry.boundingBox.getCenter(new THREE.Vector3());
                     geometry.translate(-center.x, -center.y, -center.z);
-
                     const mesh = new THREE.Mesh(geometry, material);
                     mesh.scale.set(def.scale, def.scale, def.scale);
                     mesh.rotation.x = -Math.PI / 2;
-                    
                     setupBone(mesh, def);
                     modelLoaded();
                 }, undefined, (error) => {
@@ -354,12 +377,9 @@
         function setupBone(mesh, def) {
             mesh.position.copy(def.initialPos);
             mesh.userData = { 
-                id: def.id, 
-                name: def.name, 
-                type: 'draggable', 
-                placed: false, 
-                initialPos: def.initialPos.clone(),
-                targetPos: def.targetPos
+                id: def.id, name: def.name, type: 'draggable', placed: false, 
+                initialPos: def.initialPos.clone(), targetPos: def.targetPos,
+                description: def.description // 將描述加入 userData
             };
             gameGroup.add(mesh);
             draggableObjects.push(mesh);
@@ -377,102 +397,79 @@
             mouse.x = (pointer.clientX / window.innerWidth) * 2 - 1;
             mouse.y = -(pointer.clientY / window.innerHeight) * 2 + 1;
         }
-
-        // --- 優化：整合桌面與觸控操作邏輯 ---
         
         function onPointerDown(event) {
-            event.preventDefault(); // 防止頁面滾動等預設行為
-            
+            event.preventDefault();
             const pointer = event.touches ? event.touches[0] : event;
             pointerDownPosition.set(pointer.clientX, pointer.clientY);
             updatePointerPosition(event);
-            
-            // 手機/平板：設定長按計時器來觸發拖曳
             if (event.touches) {
-                longPressTimeout = setTimeout(() => {
-                    startDrag();
-                    longPressTimeout = null;
-                }, 250); // 250毫秒算作長按
-            } else {
-                // 電腦：立即開始拖曳檢測
-                startDrag();
-            }
+                longPressTimeout = setTimeout(() => { startDrag(); longPressTimeout = null; }, 250);
+            } else { startDrag(); }
         }
         
         function startDrag() {
             raycaster.setFromCamera(mouse, camera);
             const intersects = raycaster.intersectObjects(draggableObjects, true);
-
             if (intersects.length > 0) {
                 let object = intersects[0].object;
-                while (object.parent && !object.userData.type) {
-                    object = object.parent;
-                }
+                while (object.parent && !object.userData.type) { object = object.parent; }
                 if (object.userData.type === 'draggable' && !object.userData.placed) {
+                    if (!gameStarted) {
+                        startTimer();
+                        gameStarted = true;
+                    }
                     selectedObject = object;
                     isDragging = true;
-                    controls.enabled = false; // 拖曳時關閉視角控制
-
-                    // 優化：建立一個與攝影機平行的平面來進行拖曳，手感更佳
-                    const distance = camera.position.distanceTo(selectedObject.position);
-                    dragPlane.setFromNormalAndCoplanarPoint(camera.getWorldDirection(dragPlane.normal), selectedObject.position);
+                    controls.enabled = false;
+                    boneNameText.textContent = selectedObject.userData.name;
+                    boneDescriptionText.textContent = selectedObject.userData.description;
+                    dragPlane.setFromNormalAndCoplanarPoint(camera.getWorldDirection(dragPlane.normal), intersects[0].point);
+                    dragOffset.copy(intersects[0].point).sub(selectedObject.position);
                 }
             }
         }
 
-
         function onPointerMove(event) {
             if (event.touches) {
                 const pointer = event.touches[0];
-                // 如果手指移動超過一個微小範圍，就取消長按，視為旋轉視角
                 if (longPressTimeout && pointerDownPosition.distanceTo(new THREE.Vector2(pointer.clientX, pointer.clientY)) > 10) {
                     clearTimeout(longPressTimeout);
                     longPressTimeout = null;
                 }
             }
-        
             updatePointerPosition(event);
-
-            // 如果正在拖曳物件
             if (isDragging && selectedObject) {
                 raycaster.setFromCamera(mouse, camera);
                 raycaster.ray.intersectPlane(dragPlane, intersectionPoint);
-                selectedObject.position.copy(intersectionPoint);
+                selectedObject.position.copy(intersectionPoint).sub(dragOffset);
                 return;
             }
-
-            // 如果只是滑鼠移動（未拖曳），則顯示骨骼名稱
             if (!isDragging) {
                  raycaster.setFromCamera(mouse, camera);
                 const intersects = raycaster.intersectObjects(draggableObjects, true);
                 if (intersects.length > 0) {
                     let object = intersects[0].object;
-                     while (object.parent && !object.userData.type) {
-                        object = object.parent;
-                    }
+                     while (object.parent && !object.userData.type) { object = object.parent; }
                     if (object.userData.name) {
                         boneNameText.textContent = object.userData.name;
+                        boneDescriptionText.textContent = object.userData.description;
                         document.body.style.cursor = 'pointer';
                     }
                 } else {
                     boneNameText.textContent = '';
+                    boneDescriptionText.textContent = '將骨骼拖曳到中央的正確位置。';
                     document.body.style.cursor = 'default';
                 }
             }
         }
 
         function onPointerUp(event) {
-            // 清除長按計時器
-            if (longPressTimeout) {
-                clearTimeout(longPressTimeout);
-                longPressTimeout = null;
-            }
-            
+            if (longPressTimeout) { clearTimeout(longPressTimeout); longPressTimeout = null; }
             if (isDragging && selectedObject) {
                 const targetPos = selectedObject.userData.targetPos;
                 const distance = selectedObject.position.distanceTo(targetPos);
-
-                if (distance < 30) { // 統一桌面和手機的吸附範圍
+                if (distance < 30) {
                     selectedObject.position.copy(targetPos);
                     selectedObject.userData.placed = true;
                     selectedObject.material.color.set(0x50c878);
@@ -481,23 +478,27 @@
                     selectedObject.position.copy(selectedObject.userData.initialPos);
                 }
             }
-
-            // 重置狀態
             isDragging = false;
             selectedObject = null;
-            controls.enabled = true; // 重新啟用視角控制
+            controls.enabled = true;
             document.body.style.cursor = 'default';
         }
 
         function checkCompletion() {
             const allPlaced = draggableObjects.every(obj => obj.userData.placed);
             if (allPlaced) {
+                stopTimer();
+                finalTimeText.textContent = `您的完成時間為：${timerText.textContent}`;
                 completionMessage.style.display = 'flex';
             }
         }
 
         function resetGame() {
             completionMessage.style.display = 'none';
+            stopTimer();
+            secondsElapsed = 0;
+            timerText.textContent = '00:00';
+            gameStarted = false;
             bonesData.forEach(bone => {
                 bone.userData.placed = false;
                 bone.position.copy(bone.userData.initialPos);
@@ -507,14 +508,18 @@
         
         function animate() {
             controls.update();
-            
-            // VR 控制器更新
-            handleController(controller1);
-            handleController(controller2);
-            
+            handleController(controller1, controllerGrip1);
+            handleController(controller2, controllerGrip2);
             renderer.render(scene, camera);
         }
 
     </script>
 </body>
 </html>
+
+
+
+
+
+
+
