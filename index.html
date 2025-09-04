@@ -95,6 +95,7 @@
         let selectedObject = null;
         let controller1, controller2; // VR 控制器
         let controllerGrip1, controllerGrip2;
+        let gameGroup; // 用於容納所有遊戲物件的群組
         
         const draggableObjects = [];
         const bonesData = [];
@@ -112,27 +113,35 @@
 
         // --- 骨骼資料定義 ---
         const boneDefinitions = [
-            { id: 'pelvis', name: '骨盆', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/pelvis.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(100, 0, 0), targetPos: new THREE.Vector3(0, 16, 0) },
-            { id: 'spinal_cord', name: '脊柱', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/spinal%20cord.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(0, -100, 0), targetPos: new THREE.Vector3(0, 36.5, -2) },
+            { id: 'pelvis', name: '骨盆', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/pelvis.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(100, 0, 0), targetPos: new THREE.Vector3(0, 20, 0) },
+            { id: 'spinal_cord', name: '脊柱', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/spinal%20cord.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(0, -100, 0), targetPos: new THREE.Vector3(0, 40.5, -2) },
             { id: 'chest', name: '胸腔', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/chest.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(0, 100, 0), targetPos: new THREE.Vector3(0, 44, 0) },
             { id: 'skull', name: '頭骨', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/head.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(-100, 50, 0), targetPos: new THREE.Vector3(0, 70.5, -1) },
+            
+            // 手臂 (Arms)
             { id: 'humerus_l', name: '左肱骨', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/upperarm02.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(-120, 30, 0), targetPos: new THREE.Vector3(-11, 43.5, 0) },
             { id: 'humerus_r', name: '右肱骨', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/upperarm.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(120, 30, 0), targetPos: new THREE.Vector3(11, 43.5, 0) },
             { id: 'radius_ulna_l', name: '左前臂骨', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/forearm02.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(-120, -20, 0), targetPos: new THREE.Vector3(-22, 15, 0) },
             { id: 'radius_ulna_r', name: '右前臂骨', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/forearm.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(120, -20, 0), targetPos: new THREE.Vector3(22, 15, 0) },
+
+            // 腿部 (Legs)
             { id: 'femur_l', name: '左股骨', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/thighbone02.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(-100, -50, 0), targetPos: new THREE.Vector3(-8, 0.5, 0) },
             { id: 'femur_r', name: '右股骨', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/thighbone.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(100, -50, 0), targetPos: new THREE.Vector3(8, 0.5, 0) },
             { id: 'tibia_l', name: '左脛骨', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/calf%20bone%2002.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(-100, -90, 0), targetPos: new THREE.Vector3(-6, -34.5, 0) },
-            { id: 'tibia_r', name: '右脛骨', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/calf%20bone.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(100, -90, 0), targetPos: new THREE.Vector3(6, -34.5, 0) },
+            { id: 'tibia_r', name: '右脛骨', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/calf%20bone.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(100, -90, 0), targetPos: new THREE.Vector3(6, -34.5, 0) }
         ];
         
         init();
 
         function init() {
             scene = new THREE.Scene();
-            // 新增：載入背景紋理
+            
+            gameGroup = new THREE.Group();
+            gameGroup.position.z = -50; // 將整個遊戲場景拉近，方便VR操作
+            scene.add(gameGroup);
+
             new THREE.TextureLoader().load(
-                'https://cdn.jsdelivr.net/gh/mrdoob/three.js/examples/textures/2294472375_24a3b8ef46_o.jpg',
+                'https://live.staticflickr.com/65535/49333912182_a231368962_k.jpg',
                 (texture) => {
                     texture.mapping = THREE.EquirectangularReflectionMapping;
                     scene.background = texture;
@@ -145,10 +154,8 @@
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.setPixelRatio(window.devicePixelRatio);
-            // 新增：啟用 WebXR
             renderer.xr.enabled = true;
             document.body.appendChild(renderer.domElement);
-            // 新增：加入 VR 按鈕
             document.body.appendChild(VRButton.createButton(renderer));
 
             const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
@@ -166,7 +173,6 @@
             createBones();
 
             window.addEventListener('resize', onWindowResize);
-            // 新增：加入觸控事件監聽
             renderer.domElement.addEventListener('mousedown', onPointerDown);
             renderer.domElement.addEventListener('mousemove', onPointerMove);
             renderer.domElement.addEventListener('mouseup', onPointerUp);
@@ -177,7 +183,6 @@
             resetButton.addEventListener('click', resetGame);
             playAgainButton.addEventListener('click', resetGame);
             
-            // 新增：使用 setAnimationLoop 以支援 VR
             renderer.setAnimationLoop(animate);
         }
 
@@ -190,7 +195,7 @@
             controller2 = renderer.xr.getController(1);
             scene.add(controller2);
 
-            const controllerModelFactory = new THREE.Group(); // Placeholder for a model
+            const controllerModelFactory = new THREE.Group(); 
             controllerGrip1 = renderer.xr.getControllerGrip(0);
             controllerGrip1.add(controllerModelFactory.clone());
             scene.add(controllerGrip1);
@@ -199,7 +204,6 @@
             controllerGrip2.add(controllerModelFactory.clone());
             scene.add(controllerGrip2);
 
-            // 為控制器加入指示線
             const lineGeometry = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -1)]);
             const line = new THREE.Line(lineGeometry);
             line.scale.z = 100;
@@ -217,7 +221,6 @@
                 }
                 if (object.userData.type === 'draggable' && !object.userData.placed) {
                     selectedObject = object;
-                    // 將物件附加到控制器上
                     controller.attach(selectedObject);
                 }
             }
@@ -226,13 +229,12 @@
         function onSelectEnd(event) {
             if (selectedObject) {
                 const controller = event.target;
-                // 將物件從控制器脫離，並放回場景
-                scene.attach(selectedObject);
+                gameGroup.attach(selectedObject);
                 
                 const targetPos = selectedObject.userData.targetPos;
                 const distance = selectedObject.position.distanceTo(targetPos);
 
-                if (distance < 25) {
+                if (distance < 35) { // 加大VR中的吸附範圍
                     selectedObject.position.copy(targetPos);
                     selectedObject.userData.placed = true;
                     selectedObject.material.color.set(0x50c878);
@@ -279,7 +281,7 @@
                 mesh.position.copy(referencePosition); 
                 mesh.rotation.x = -Math.PI / 2;
                 
-                scene.add(mesh);
+                gameGroup.add(mesh);
                 modelLoaded();
             }, undefined, (error) => {
                 console.error('無法載入完整骨架參考模型', error);
@@ -322,7 +324,7 @@
                 initialPos: def.initialPos.clone(),
                 targetPos: def.targetPos
             };
-            scene.add(mesh);
+            gameGroup.add(mesh);
             draggableObjects.push(mesh);
             bonesData.push(mesh);
         }
@@ -389,7 +391,7 @@
                 const targetPos = selectedObject.userData.targetPos;
                 const distance = selectedObject.position.distanceTo(targetPos);
 
-                if (distance < 25) {
+                if (distance < 35) { // 手機觸控的吸附範圍
                     selectedObject.position.copy(targetPos);
                     selectedObject.userData.placed = true;
                     selectedObject.material.color.set(0x50c878);
@@ -419,7 +421,6 @@
         }
         
         function animate() {
-            // *** 修正：只有在沒有拖曳物件時，才更新視角控制器 ***
             if (!selectedObject) {
                 controls.update();
             }
