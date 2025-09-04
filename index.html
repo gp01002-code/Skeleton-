@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>3D人體骨骼拼圖 V1.0</title>
+    <title>3D人體骨骼拼圖 V2.0 (操作優化版)</title>
     <!-- 引入 Tailwind CSS 以進行快速樣式設計 -->
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
@@ -97,6 +97,14 @@
         let controllerGrip1, controllerGrip2;
         let gameGroup; // 用於容納所有遊戲物件的群組
         
+        // --- 操作優化變數 ---
+        const dragPlane = new THREE.Plane();
+        const intersectionPoint = new THREE.Vector3();
+        let longPressTimeout = null;
+        let isDragging = false;
+        const pointerDownPosition = new THREE.Vector2();
+
+
         const draggableObjects = [];
         const bonesData = [];
         let modelsToLoad = 0;
@@ -113,22 +121,18 @@
 
         // --- 骨骼資料定義 ---
         const boneDefinitions = [
-            { id: 'pelvis', name: '骨盆', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/pelvis.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(100, 0, 0), targetPos: new THREE.Vector3(0, 20, 0) },
-            { id: 'spinal_cord', name: '脊柱', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/spinal%20cord.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(0, -100, 0), targetPos: new THREE.Vector3(0, 40.5, -2) },
-            { id: 'chest', name: '胸腔', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/chest.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(0, 100, 0), targetPos: new THREE.Vector3(0, 44, 0) },
-            { id: 'skull', name: '頭骨', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/head.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(-100, 50, 0), targetPos: new THREE.Vector3(0, 70.5, -1) },
-            
-            // 手臂 (Arms)
-            { id: 'humerus_l', name: '左肱骨', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/upperarm02.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(-120, 30, 0), targetPos: new THREE.Vector3(-11, 43.5, 0) },
-            { id: 'humerus_r', name: '右肱骨', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/upperarm.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(120, 30, 0), targetPos: new THREE.Vector3(11, 43.5, 0) },
-            { id: 'radius_ulna_l', name: '左前臂骨', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/forearm02.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(-120, -20, 0), targetPos: new THREE.Vector3(-22, 15, 0) },
-            { id: 'radius_ulna_r', name: '右前臂骨', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/forearm.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(120, -20, 0), targetPos: new THREE.Vector3(22, 15, 0) },
-
-            // 腿部 (Legs)
-            { id: 'femur_l', name: '左股骨', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/thighbone02.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(-100, -50, 0), targetPos: new THREE.Vector3(-8, 0.5, 0) },
-            { id: 'femur_r', name: '右股骨', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/thighbone.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(100, -50, 0), targetPos: new THREE.Vector3(8, 0.5, 0) },
-            { id: 'tibia_l', name: '左脛骨', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/calf%20bone%2002.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(-100, -90, 0), targetPos: new THREE.Vector3(-6, -34.5, 0) },
-            { id: 'tibia_r', name: '右脛骨', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/calf%20bone.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(100, -90, 0), targetPos: new THREE.Vector3(6, -34.5, 0) }
+            { id: 'pelvis', name: '骨盆', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/pelvis.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(80, 0, 0), targetPos: new THREE.Vector3(0, 16, 0) },
+            { id: 'spinal_cord', name: '脊柱', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/spinal%20cord.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(0, -80, 0), targetPos: new THREE.Vector3(0, 36.5, -2) },
+            { id: 'chest', name: '胸腔', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/chest.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(0, 80, 0), targetPos: new THREE.Vector3(0, 44, 0) },
+            { id: 'skull', name: '頭骨', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/head.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(-80, 50, 0), targetPos: new THREE.Vector3(0, 70.5, -1) },
+            { id: 'humerus_l', name: '左肱骨', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/upperarm02.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(-95, 30, 0), targetPos: new THREE.Vector3(-11, 43.5, 0) },
+            { id: 'humerus_r', name: '右肱骨', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/upperarm.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(95, 30, 0), targetPos: new THREE.Vector3(11, 43.5, 0) },
+            { id: 'radius_ulna_l', name: '左前臂骨', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/forearm02.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(-95, -20, 0), targetPos: new THREE.Vector3(-22, 15, 0) },
+            { id: 'radius_ulna_r', name: '右前臂骨', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/forearm.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(95, -20, 0), targetPos: new THREE.Vector3(22, 15, 0) },
+            { id: 'femur_l', name: '左股骨', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/thighbone02.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(-80, -50, 0), targetPos: new THREE.Vector3(-8, 0.5, 0) },
+            { id: 'femur_r', name: '右股骨', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/thighbone.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(80, -50, 0), targetPos: new THREE.Vector3(8, 0.5, 0) },
+            { id: 'tibia_l', name: '左脛骨', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/calf%20bone%2002.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(-80, -80, 0), targetPos: new THREE.Vector3(-6, -34.5, 0) },
+            { id: 'tibia_r', name: '右脛骨', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/calf%20bone.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(80, -80, 0), targetPos: new THREE.Vector3(6, -34.5, 0) }
         ];
         
         init();
@@ -137,7 +141,7 @@
             scene = new THREE.Scene();
             
             gameGroup = new THREE.Group();
-            gameGroup.position.z = -50; // 將整個遊戲場景拉近，方便VR操作
+            gameGroup.position.z = -80; 
             scene.add(gameGroup);
 
             new THREE.TextureLoader().load(
@@ -163,8 +167,12 @@
             const directionalLight = new THREE.DirectionalLight(0xffffff, 1.2);
             directionalLight.position.set(50, 100, 75);
             scene.add(directionalLight);
+            
             controls = new OrbitControls(camera, renderer.domElement);
             controls.enableDamping = true;
+            // 優化：讓鏡頭圍繞骨架中心旋轉，而不是世界中心
+            controls.target.copy(referencePosition).add(gameGroup.position);
+            
             raycaster = new THREE.Raycaster();
             mouse = new THREE.Vector2();
             
@@ -193,9 +201,15 @@
             scene.add(controller1);
 
             controller2 = renderer.xr.getController(1);
+            controller2.addEventListener('selectstart', onSelectStart);
+            controller2.addEventListener('selectend', onSelectEnd);
             scene.add(controller2);
 
-            const controllerModelFactory = new THREE.Group(); 
+            const controllerModelFactory = new THREE.Line(
+                new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -1)]),
+                new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 2 })
+            );
+
             controllerGrip1 = renderer.xr.getControllerGrip(0);
             controllerGrip1.add(controllerModelFactory.clone());
             scene.add(controllerGrip1);
@@ -203,11 +217,6 @@
             controllerGrip2 = renderer.xr.getControllerGrip(1);
             controllerGrip2.add(controllerModelFactory.clone());
             scene.add(controllerGrip2);
-
-            const lineGeometry = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -1)]);
-            const line = new THREE.Line(lineGeometry);
-            line.scale.z = 100;
-            controller1.add(line.clone());
         }
 
         function onSelectStart(event) {
@@ -228,13 +237,12 @@
 
         function onSelectEnd(event) {
             if (selectedObject) {
-                const controller = event.target;
                 gameGroup.attach(selectedObject);
                 
                 const targetPos = selectedObject.userData.targetPos;
                 const distance = selectedObject.position.distanceTo(targetPos);
 
-                if (distance < 35) { // 加大VR中的吸附範圍
+                if (distance < 40) { // VR吸附範圍
                     selectedObject.position.copy(targetPos);
                     selectedObject.userData.placed = true;
                     selectedObject.material.color.set(0x50c878);
@@ -245,6 +253,29 @@
                 selectedObject = null;
             }
         }
+        
+        // 優化：VR控制器的視覺回饋
+        function handleController(controller) {
+            if (controller.visible) {
+                const intersections = getIntersections(controller);
+                const line = controller.getObjectByProperty('type', 'Line');
+                
+                if (intersections.length > 0) {
+                     let object = intersections[0].object;
+                     while (object.parent && !object.userData.type) {
+                        object = object.parent;
+                     }
+                    if(object.userData.type === 'draggable' && !object.userData.placed){
+                        line.material.color.set(0x00ff00); // 綠色表示可選取
+                    } else {
+                        line.material.color.set(0xffffff); // 白色
+                    }
+                } else {
+                    line.material.color.set(0xffffff); // 白色
+                }
+            }
+        }
+
 
         function getIntersections(controller) {
             const tempMatrix = new THREE.Matrix4();
@@ -270,7 +301,9 @@
                 const material = new THREE.MeshStandardMaterial({ 
                     color: 0x00ffff,
                     transparent: true,
-                    opacity: 0.25
+                    opacity: 0.25,
+                    metalness: 0.2,
+                    roughness: 0.8
                 });
                 geometry.computeBoundingBox();
                 const center = geometry.boundingBox.getCenter(new THREE.Vector3());
@@ -295,7 +328,11 @@
                 modelsToLoad++;
                 const url = def.modelUrl.replace(/ /g, '%20');
                 stlLoader.load(url, (geometry) => {
-                    const material = new THREE.MeshStandardMaterial({ color: 0xebe5d1 });
+                    const material = new THREE.MeshStandardMaterial({ 
+                        color: 0xebe5d1,
+                        metalness: 0.3,
+                        roughness: 0.6
+                    });
                     
                     geometry.computeBoundingBox();
                     const center = geometry.boundingBox.getCenter(new THREE.Vector3());
@@ -341,57 +378,101 @@
             mouse.y = -(pointer.clientY / window.innerHeight) * 2 + 1;
         }
 
+        // --- 優化：整合桌面與觸控操作邏輯 ---
+        
         function onPointerDown(event) {
-            if (event.touches) event.preventDefault();
+            event.preventDefault(); // 防止頁面滾動等預設行為
+            
+            const pointer = event.touches ? event.touches[0] : event;
+            pointerDownPosition.set(pointer.clientX, pointer.clientY);
             updatePointerPosition(event);
+            
+            // 手機/平板：設定長按計時器來觸發拖曳
+            if (event.touches) {
+                longPressTimeout = setTimeout(() => {
+                    startDrag();
+                    longPressTimeout = null;
+                }, 250); // 250毫秒算作長按
+            } else {
+                // 電腦：立即開始拖曳檢測
+                startDrag();
+            }
+        }
+        
+        function startDrag() {
             raycaster.setFromCamera(mouse, camera);
             const intersects = raycaster.intersectObjects(draggableObjects, true);
 
             if (intersects.length > 0) {
                 let object = intersects[0].object;
-                 while (object.parent && !object.userData.type) {
+                while (object.parent && !object.userData.type) {
                     object = object.parent;
                 }
                 if (object.userData.type === 'draggable' && !object.userData.placed) {
                     selectedObject = object;
-                    controls.enabled = false;
+                    isDragging = true;
+                    controls.enabled = false; // 拖曳時關閉視角控制
+
+                    // 優化：建立一個與攝影機平行的平面來進行拖曳，手感更佳
+                    const distance = camera.position.distanceTo(selectedObject.position);
+                    dragPlane.setFromNormalAndCoplanarPoint(camera.getWorldDirection(dragPlane.normal), selectedObject.position);
                 }
             }
         }
 
+
         function onPointerMove(event) {
-            if (event.touches) event.preventDefault();
+            if (event.touches) {
+                const pointer = event.touches[0];
+                // 如果手指移動超過一個微小範圍，就取消長按，視為旋轉視角
+                if (longPressTimeout && pointerDownPosition.distanceTo(new THREE.Vector2(pointer.clientX, pointer.clientY)) > 10) {
+                    clearTimeout(longPressTimeout);
+                    longPressTimeout = null;
+                }
+            }
+        
             updatePointerPosition(event);
-            if (selectedObject) {
-                const vector = new THREE.Vector3(mouse.x, mouse.y, 0.5);
-                vector.unproject(camera);
-                const dir = vector.sub(camera.position).normalize();
-                const distance = -camera.position.z / dir.z;
-                const pos = camera.position.clone().add(dir.multiplyScalar(distance));
-                selectedObject.position.copy(pos);
+
+            // 如果正在拖曳物件
+            if (isDragging && selectedObject) {
+                raycaster.setFromCamera(mouse, camera);
+                raycaster.ray.intersectPlane(dragPlane, intersectionPoint);
+                selectedObject.position.copy(intersectionPoint);
                 return;
             }
-            raycaster.setFromCamera(mouse, camera);
-            const intersects = raycaster.intersectObjects(draggableObjects, true);
-            if (intersects.length > 0) {
-                let object = intersects[0].object;
-                 while (object.parent && !object.userData.type) {
-                    object = object.parent;
+
+            // 如果只是滑鼠移動（未拖曳），則顯示骨骼名稱
+            if (!isDragging) {
+                 raycaster.setFromCamera(mouse, camera);
+                const intersects = raycaster.intersectObjects(draggableObjects, true);
+                if (intersects.length > 0) {
+                    let object = intersects[0].object;
+                     while (object.parent && !object.userData.type) {
+                        object = object.parent;
+                    }
+                    if (object.userData.name) {
+                        boneNameText.textContent = object.userData.name;
+                        document.body.style.cursor = 'pointer';
+                    }
+                } else {
+                    boneNameText.textContent = '';
+                    document.body.style.cursor = 'default';
                 }
-                if (object.userData.name) {
-                    boneNameText.textContent = object.userData.name;
-                }
-            } else {
-                boneNameText.textContent = '';
             }
         }
 
         function onPointerUp(event) {
-            if (selectedObject) {
+            // 清除長按計時器
+            if (longPressTimeout) {
+                clearTimeout(longPressTimeout);
+                longPressTimeout = null;
+            }
+            
+            if (isDragging && selectedObject) {
                 const targetPos = selectedObject.userData.targetPos;
                 const distance = selectedObject.position.distanceTo(targetPos);
 
-                if (distance < 35) { // 手機觸控的吸附範圍
+                if (distance < 30) { // 統一桌面和手機的吸附範圍
                     selectedObject.position.copy(targetPos);
                     selectedObject.userData.placed = true;
                     selectedObject.material.color.set(0x50c878);
@@ -400,8 +481,12 @@
                     selectedObject.position.copy(selectedObject.userData.initialPos);
                 }
             }
+
+            // 重置狀態
+            isDragging = false;
             selectedObject = null;
-            controls.enabled = true;
+            controls.enabled = true; // 重新啟用視角控制
+            document.body.style.cursor = 'default';
         }
 
         function checkCompletion() {
@@ -421,13 +506,15 @@
         }
         
         function animate() {
-            if (!selectedObject) {
-                controls.update();
-            }
+            controls.update();
+            
+            // VR 控制器更新
+            handleController(controller1);
+            handleController(controller2);
+            
             renderer.render(scene, camera);
         }
 
     </script>
 </body>
 </html>
-
