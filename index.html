@@ -245,6 +245,7 @@
                 new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -1)]),
                 new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 2 })
             );
+            model1.scale.z = 100; // 修正：將射線拉長100倍，使其在VR中可見
             controllerGrip1.add(model1);
             scene.add(controllerGrip1);
 
@@ -258,6 +259,7 @@
                 new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -1)]),
                 new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 2 })
             );
+            model2.scale.z = 100; // 修正：將射線拉長100倍，使其在VR中可見
             controllerGrip2.add(model2);
             scene.add(controllerGrip2);
         }
@@ -516,6 +518,7 @@
     </script>
 </body>
 </html>
+
 
 
 
