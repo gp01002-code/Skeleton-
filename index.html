@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>3D人體骨骼拼圖 V2.5 - 初始位置優化</title>
+    <title>3D人體骨骼拼圖 V2.6 - VR移動功能</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body {
@@ -110,6 +110,7 @@
         let selectedObject = null;
         let controller1, controller2;
         let controllerGrip1, controllerGrip2;
+        const clock = new THREE.Clock(); // 用於計算幀時間差
         
         // 控制器狀態追蹤
         const controllerStates = {
@@ -155,6 +156,8 @@
         const sceneScaleFactor = 10;
         const referencePosition = new THREE.Vector3(0, 13.5, 0);
         const snapDistance = 25;
+        const VR_MOVEMENT_SPEED = 15.0; // VR 移動速度
+        const VR_ZOOM_SPEED = 20.0; // VR 縮放/前進後退速度
 
         const boneDefinitions = [
             { id: 'pelvis', name: '骨盆', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/pelvis.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(80, 0, 0), targetPos: new THREE.Vector3(0, 18, 0) },
@@ -171,7 +174,6 @@
             { id: 'tibia_r', name: '右脛骨', modelUrl: 'https://raw.githubusercontent.com/gp01002-code/Skeleton-/main/calf%20bone.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(80, -80, 0), targetPos: new THREE.Vector3(6, -34.5, 0) }
         ];
         
-        // Debug 模式開關
         window.addEventListener('keydown', (e) => {
             if (e.key === 'd' || e.key === 'D') {
                 debugPanel.style.display = debugPanel.style.display === 'none' ? 'block' : 'none';
@@ -268,7 +270,7 @@
                     if (inputSources.length > 1) controller2.userData.inputSource = inputSources[1];
                 });
 
-                session.requestReferenceSpace('local').then(refSpace => {
+                session.requestReferenceSpace('local-floor').then(refSpace => {
                     renderer.xr.setReferenceSpace(refSpace);
                 });
             }
@@ -956,6 +958,52 @@
                 if (line && line.material) line.material.color.set(0x00ff00);
             }
         }
+
+        // 新增：處理 VR 搖桿移動的函式
+        function handleVRLocomotion(delta) {
+            const camera = renderer.xr.getCamera();
+            const playerRig = camera.parent; // VR 相機的父物件通常是可移動的 XR rig
+            if (!playerRig) return;
+
+            // --- 左控制器: 平面移動 ---
+            const leftSource = controller1.userData.inputSource;
+            if (leftSource && leftSource.gamepad && leftSource.gamepad.axes.length > 3) {
+                const axes = leftSource.gamepad.axes;
+                const moveZ = Math.abs(axes[3]) > 0.1 ? axes[3] : 0;
+                const moveX = Math.abs(axes[2]) > 0.1 ? axes[2] : 0;
+
+                if (moveZ !== 0 || moveX !== 0) {
+                    const quaternion = camera.quaternion;
+                    
+                    // 計算前進方向 (忽略Y軸)
+                    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(quaternion);
+                    forward.y = 0;
+                    forward.normalize();
+                    
+                    // 計算右側方向
+                    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(quaternion);
+                    right.y = 0;
+                    right.normalize();
+
+                    playerRig.position.add(forward.multiplyScalar(VR_MOVEMENT_SPEED * -moveZ * delta));
+                    playerRig.position.add(right.multiplyScalar(VR_MOVEMENT_SPEED * moveX * delta));
+                }
+            }
+            
+            // --- 右控制器: 前後縮放 (Dolly) ---
+            const rightSource = controller2.userData.inputSource;
+             if (rightSource && rightSource.gamepad && rightSource.gamepad.axes.length > 3) {
+                const axes = rightSource.gamepad.axes;
+                const dolly = Math.abs(axes[3]) > 0.1 ? axes[3] : 0;
+                
+                if (dolly !== 0) {
+                    const dollyDirection = new THREE.Vector3();
+                    camera.getWorldDirection(dollyDirection);
+                    
+                    playerRig.position.add(dollyDirection.multiplyScalar(VR_ZOOM_SPEED * -dolly * delta));
+                }
+            }
+        }
         
         let lastDebugUpdate = performance.now();
         
@@ -985,12 +1033,14 @@
         }
         
         function animate() {
+            const delta = clock.getDelta(); // 獲取幀時間差
             controls.update();
             const now = performance.now();
             
             if (renderer.xr.isPresenting) {
                 handleController(controller1, 'controller1');
                 handleController(controller2, 'controller2');
+                handleVRLocomotion(delta); // 處理 VR 移動
                 
                 const c1Intersected = controllerStates.controller1.intersectedObject;
                 const c2Intersected = controllerStates.controller2.intersectedObject;
@@ -1019,6 +1069,4 @@
     </script>
 </body>
 </html>
-
-
 
