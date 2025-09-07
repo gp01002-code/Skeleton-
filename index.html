@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>3D人體骨骼拼圖 V6.1 - 背景修復版</title>
+    <title>3D Skeletal Puzzle Game (v.6.1)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body { margin: 0; overflow: hidden; background-color: #1a202c; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; }
@@ -20,9 +20,10 @@
             z-index: 10;
             padding: 0.5rem 0.75rem;
             width: auto;
-            min-width: 220px;
+            min-width: 250px; 
         }
         .bone-name { min-height: 24px; }
+        .bone-description { min-height: 40px; color: #a0aec0; } 
         .button { transition: all 0.2s ease-in-out; }
         .button:hover { transform: scale(1.05); }
         #completion-message, #start-screen { display: none; }
@@ -33,17 +34,22 @@
     <div id="loading-overlay" class="absolute inset-0 z-30 flex items-center justify-center bg-black bg-opacity-70 text-white">
         <p class="text-2xl">模型載入中...</p>
     </div>
-    <div id="start-screen" class="absolute inset-0 z-40 flex-col items-center justify-center bg-gray-900 text-white text-center" style="display: flex;">
-        <h1 class="text-5xl font-bold mb-4">3D人體骨骼拼圖</h1>
-        <p class="text-xl mb-8">一個具教育意義的互動體驗</p>
-        <button id="start-button" class="bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-8 rounded-lg text-2xl button shadow-xl">開始體驗</button>
+    <!-- Updated background image URL to user's GitHub file -->
+    <div id="start-screen" class="absolute inset-0 z-40 flex flex-col items-center justify-center bg-gray-900 text-white text-center bg-cover bg-center" style="display: flex; background-image: url('https://cdn.jsdelivr.net/gh/gp01002-code/Skeleton-/YOUR_IMAGE_URL_HERE.jpg');">
+        <div class="absolute inset-0 bg-black opacity-50"></div>
+        <div class="relative z-10">
+            <h1 class="text-5xl font-bold mb-4" style="text-shadow: 2px 2px 8px rgba(0,0,0,0.7);">3D Skeletal Puzzle Game (v.6.1)</h1>
+            <p class="text-xl mb-8" style="text-shadow: 1px 1px 4px rgba(0,0,0,0.7);">Professor Wu Chun Hsueh</p>
+            <button id="start-button" class="bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-8 rounded-lg text-2xl button shadow-xl">開始體驗</button>
+        </div>
     </div>
     <div id="info-panel-html" class="info-panel shadow-lg" style="display: none;">
         <div class="flex justify-between items-center">
-            <h1 class="text-md font-bold text-white whitespace-nowrap">3D人體骨骼拼圖</h1>
+            <h1 class="text-md font-bold text-white whitespace-nowrap">3D Skeletal Puzzle</h1>
             <p id="timer-text" class="text-md text-yellow-300 font-mono ml-2">時間: 00:00</p>
         </div>
         <p id="bone-name-text" class="mt-2 text-sm text-cyan-300 font-semibold bone-name">指向一塊骨骼以查看資訊。</p>
+        <p id="bone-description-text" class="mt-1 text-xs bone-description"></p>
     </div>
     <div id="completion-message" class="absolute inset-0 z-20 flex-col items-center justify-center bg-black bg-opacity-80 text-white text-center">
         <h2 class="text-6xl font-bold mb-4 animate-pulse">恭喜！</h2>
@@ -87,6 +93,7 @@
         let timerInterval = null;
         
         const boneNameText = document.getElementById('bone-name-text');
+        const boneDescriptionText = document.getElementById('bone-description-text');
         const timerText = document.getElementById('timer-text');
         const completionMessage = document.getElementById('completion-message');
         const resetButton = document.getElementById('reset-button');
@@ -100,20 +107,21 @@
         const referencePosition = new THREE.Vector3(0, 13.5, 0);
         const snapDistance = 35;
         const VR_MOVEMENT_SPEED = 25.0;
+        const VR_ZOOM_SPEED = 25.0;
 
         const boneDefinitions = [
-            { id: 'pelvis', name: '骨盆', modelUrl: 'https://cdn.jsdelivr.net/gh/gp01002-code/Skeleton-/pelvis.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(80, 0, 0), targetPos: new THREE.Vector3(0, 18, 0) },
-            { id: 'spinal_cord', name: '脊柱', modelUrl: 'https://cdn.jsdelivr.net/gh/gp01002-code/Skeleton-/spinal%20cord.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(0, -80, 0), targetPos: new THREE.Vector3(0, 43.5, -2) },
-            { id: 'chest', name: '胸腔', modelUrl: 'https://cdn.jsdelivr.net/gh/gp01002-code/Skeleton-/chest.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(0, 90, 0), targetPos: new THREE.Vector3(0, 44, 0) },
-            { id: 'skull', name: '頭骨', modelUrl: 'https://cdn.jsdelivr.net/gh/gp01002-code/Skeleton-/head.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(-80, 50, 0), targetPos: new THREE.Vector3(0, 70.5, -1) },
-            { id: 'humerus_l', name: '左肱骨', modelUrl: 'https://cdn.jsdelivr.net/gh/gp01002-code/Skeleton-/upperarm02.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(-95, 30, 0), targetPos: new THREE.Vector3(-11, 43.5, -2) },
-            { id: 'humerus_r', name: '右肱骨', modelUrl: 'https://cdn.jsdelivr.net/gh/gp01002-code/Skeleton-/upperarm.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(95, 30, 0), targetPos: new THREE.Vector3(11, 43.5, -2) },
-            { id: 'radius_ulna_l', name: '左前臂骨', modelUrl: 'https://cdn.jsdelivr.net/gh/gp01002-code/Skeleton-/forearm02.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(-95, -20, 0), targetPos: new THREE.Vector3(-22, 15, 2) },
-            { id: 'radius_ulna_r', name: '右前臂骨', modelUrl: 'https://cdn.jsdelivr.net/gh/gp01002-code/Skeleton-/forearm.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(95, -20, 0), targetPos: new THREE.Vector3(22, 15, 2) },
-            { id: 'femur_l', name: '左股骨', modelUrl: 'https://cdn.jsdelivr.net/gh/gp01002-code/Skeleton-/thighbone02.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(-80, -50, 0), targetPos: new THREE.Vector3(-8, 0.5, 0) },
-            { id: 'femur_r', name: '右股骨', modelUrl: 'https://cdn.jsdelivr.net/gh/gp01002-code/Skeleton-/thighbone.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(80, -50, 0), targetPos: new THREE.Vector3(8, 0.5, 0) },
-            { id: 'tibia_l', name: '左脛骨', modelUrl: 'https://cdn.jsdelivr.net/gh/gp01002-code/Skeleton-/calf%20bone%2002.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(-80, -80, 0), targetPos: new THREE.Vector3(-6, -34.5, 0) },
-            { id: 'tibia_r', name: '右脛骨', modelUrl: 'https://cdn.jsdelivr.net/gh/gp01002-code/Skeleton-/calf%20bone.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(80, -80, 0), targetPos: new THREE.Vector3(6, -34.5, 0) }
+            { id: 'pelvis', name: '骨盆', description: '連接脊柱與下肢，支撐腹部器官。', modelUrl: 'https://cdn.jsdelivr.net/gh/gp01002-code/Skeleton-/pelvis.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(80, 0, 0), targetPos: new THREE.Vector3(0, 18, 0) },
+            { id: 'spinal_cord', name: '脊柱', description: '支撐身體核心，保護脊髓。', modelUrl: 'https://cdn.jsdelivr.net/gh/gp01002-code/Skeleton-/spinal%20cord.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(0, -80, 0), targetPos: new THREE.Vector3(0, 43.5, -2) },
+            { id: 'chest', name: '胸腔', description: '保護心臟和肺部等重要器官。', modelUrl: 'https://cdn.jsdelivr.net/gh/gp01002-code/Skeleton-/chest.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(0, 90, 0), targetPos: new THREE.Vector3(0, 44, 0) },
+            { id: 'skull', name: '頭骨', description: '保護大腦並構成臉部結構。', modelUrl: 'https://cdn.jsdelivr.net/gh/gp01002-code/Skeleton-/head.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(-80, 50, 0), targetPos: new THREE.Vector3(0, 70.5, -1) },
+            { id: 'humerus_l', name: '左肱骨', description: '上臂的長骨，連接肩部與肘部。', modelUrl: 'https://cdn.jsdelivr.net/gh/gp01002-code/Skeleton-/upperarm02.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(-95, 30, 0), targetPos: new THREE.Vector3(-11, 43.5, -2) },
+            { id: 'humerus_r', name: '右肱骨', description: '上臂的長骨，連接肩部與肘部。', modelUrl: 'https://cdn.jsdelivr.net/gh/gp01002-code/Skeleton-/upperarm.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(95, 30, 0), targetPos: new THREE.Vector3(11, 43.5, -2) },
+            { id: 'radius_ulna_l', name: '左前臂骨', description: '由橈骨和尺骨組成，連接肘部與手腕。', modelUrl: 'https://cdn.jsdelivr.net/gh/gp01002-code/Skeleton-/forearm02.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(-95, -20, 0), targetPos: new THREE.Vector3(-22, 15, 2) },
+            { id: 'radius_ulna_r', name: '右前臂骨', description: '由橈骨和尺骨組成，連接肘部與手腕。', modelUrl: 'https://cdn.jsdelivr.net/gh/gp01002-code/Skeleton-/forearm.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(95, -20, 0), targetPos: new THREE.Vector3(22, 15, 2) },
+            { id: 'femur_l', name: '左股骨', description: '人體最長最堅固的骨骼，位於大腿。', modelUrl: 'https://cdn.jsdelivr.net/gh/gp01002-code/Skeleton-/thighbone02.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(-80, -50, 0), targetPos: new THREE.Vector3(-8, 0.5, 0) },
+            { id: 'femur_r', name: '右股骨', description: '人體最長最堅固的骨骼，位於大腿。', modelUrl: 'https://cdn.jsdelivr.net/gh/gp01002-code/Skeleton-/thighbone.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(80, -50, 0), targetPos: new THREE.Vector3(8, 0.5, 0) },
+            { id: 'tibia_l', name: '左脛骨', description: '小腿主要的承重骨。', modelUrl: 'https://cdn.jsdelivr.net/gh/gp01002-code/Skeleton-/calf%20bone%2002.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(-80, -80, 0), targetPos: new THREE.Vector3(-6, -34.5, 0) },
+            { id: 'tibia_r', name: '右脛骨', description: '小腿主要的承重骨。', modelUrl: 'https://cdn.jsdelivr.net/gh/gp01002-code/Skeleton-/calf%20bone.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(80, -80, 0), targetPos: new THREE.Vector3(6, -34.5, 0) }
         ];
         
         startButton.addEventListener('click', () => {
@@ -125,7 +133,7 @@
         function init() {
             scene = new THREE.Scene();
             
-            // **FIX:** Replaced placeholder with the full, correct jsDelivr URL
+            // Updated background image URL to user's GitHub file
             const backgroundUrl = "https://cdn.jsdelivr.net/gh/gp01002-code/Skeleton-/YOUR_IMAGE_URL_HERE.jpg";
             
             new THREE.TextureLoader().load(backgroundUrl, 
@@ -237,10 +245,10 @@
             const canvas = document.createElement('canvas');
             const context = canvas.getContext('2d');
             canvas.width = 512;
-            canvas.height = 128;
+            canvas.height = 200; 
             const texture = new THREE.CanvasTexture(canvas);
             const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true, side: THREE.DoubleSide });
-            const geometry = new THREE.PlaneGeometry(50, 12.5);
+            const geometry = new THREE.PlaneGeometry(50, 19.5); 
             vrInfoPanel = new THREE.Mesh(geometry, material);
             vrInfoPanel.position.set(0, 25, -40);
             vrInfoPanel.userData.context = context;
@@ -248,7 +256,7 @@
             playerRig.add(vrInfoPanel);
         }
 
-        function updateVRInfoPanel(boneName, time) {
+        function updateVRInfoPanel(bone, time) {
             if (!vrInfoPanel || !renderer.xr.isPresenting) {
                 if(vrInfoPanel) vrInfoPanel.visible = false;
                 return;
@@ -257,15 +265,41 @@
             const context = vrInfoPanel.userData.context;
             const texture = vrInfoPanel.userData.texture;
             context.fillStyle = 'rgba(0, 0, 0, 0.7)';
-            context.fillRect(0, 0, 512, 128);
+            context.fillRect(0, 0, 512, 200);
             context.fillStyle = 'white';
             context.font = 'bold 24px sans-serif';
-            context.fillText('3D人體骨骼拼圖', 10, 30);
+            context.fillText('3D Skeletal Puzzle', 10, 30);
             context.font = '24px monospace';
             context.fillText(`時間: ${time}`, 350, 30);
-            context.fillStyle = '#00ffff';
-            context.font = 'bold 30px sans-serif';
-            context.fillText(boneName || '指向骨骼...', 10, 85);
+            
+            if (bone) {
+                context.fillStyle = '#00ffff';
+                context.font = 'bold 30px sans-serif';
+                context.fillText(bone.name, 10, 85);
+                context.fillStyle = '#a0aec0';
+                context.font = '22px sans-serif';
+                const words = bone.description.split('');
+                let line = '';
+                let y = 125;
+                for(let n = 0; n < words.length; n++) {
+                    const testLine = line + words[n];
+                    const metrics = context.measureText(testLine);
+                    const testWidth = metrics.width;
+                    if (testWidth > 490 && n > 0) {
+                        context.fillText(line, 10, y);
+                        line = words[n];
+                        y += 25;
+                    } else {
+                        line = testLine;
+                    }
+                }
+                context.fillText(line, 10, y);
+
+            } else {
+                 context.fillStyle = '#00ffff';
+                context.font = 'bold 30px sans-serif';
+                context.fillText('指向骨骼...', 10, 85);
+            }
             texture.needsUpdate = true;
         }
 
@@ -350,11 +384,11 @@
 
         function vibrate(controller, intensity = 0.5, duration = 100) {
             const session = renderer.xr.getSession();
-            if(!session) return;
-            const source = Array.from(session.inputSources).find(s => {
-                const grip = (controller.name === 'controller1') ? controllerGrip1 : controllerGrip2;
-                return s.gripSpace === grip;
-            });
+            if (!session || !session.inputSources) return;
+            
+            const handedness = (controller.name === 'controller1') ? 'left' : 'right';
+            const source = Array.from(session.inputSources).find(s => s.handedness === handedness);
+
             if (source && source.gamepad && source.gamepad.hapticActuators && source.gamepad.hapticActuators.length > 0) {
                 source.gamepad.hapticActuators[0].pulse(intensity, duration);
             }
@@ -424,7 +458,7 @@
         }
         function setupBone(mesh, def) {
             mesh.position.copy(def.initialPos);
-            mesh.userData = { id: def.id, name: def.name, type: 'draggable', placed: false, initialPos: def.initialPos.clone(), targetPos: def.targetPos };
+            mesh.userData = { id: def.id, name: def.name, description: def.description, type: 'draggable', placed: false, initialPos: def.initialPos.clone(), targetPos: def.targetPos };
             
             const hitbox = new THREE.Mesh(
                 new THREE.BoxGeometry(1, 1, 1),
@@ -480,7 +514,6 @@
                 const planeNormal = new THREE.Vector3(0, 0, 1);
                 planeNormal.applyQuaternion(camera.quaternion);
                 const plane = new THREE.Plane(planeNormal, 0);
-                const ray = new THREE.Ray();
                 raycaster.setFromCamera(mouse, camera);
                 raycaster.ray.intersectPlane(plane, selectedObject.position);
                 foundBone = selectedObject.userData;
@@ -497,8 +530,10 @@
             }
             if (foundBone) {
                 boneNameText.textContent = foundBone.name;
+                boneDescriptionText.textContent = foundBone.description;
             } else {
                 boneNameText.textContent = '指向一塊骨骼以查看資訊。';
+                boneDescriptionText.textContent = '';
             }
         }
 
@@ -518,7 +553,6 @@
                         selectedObject.material.color.set(0x50c878);
                     }
                     placedCount++;
-                    updatePlacedCount();
                     checkCompletion();
                 } else {
                     selectedObject.position.copy(selectedObject.userData.initialPos);
@@ -528,10 +562,6 @@
             controls.enabled = true;
         }
         
-        function updatePlacedCount() {
-            const placedCountText = document.getElementById('placed-count');
-            if(placedCountText) placedCountText.textContent = `已放置: ${placedCount}/12`;
-        }
         function checkCompletion() {
             if (placedCount >= boneDefinitions.length) {
                 stopTimer();
@@ -578,8 +608,8 @@
             completionMessage.style.display = 'none';
             resetTimer();
             placedCount = 0;
-            updatePlacedCount();
             boneNameText.textContent = '指向一塊骨骼以查看資訊。';
+            boneDescriptionText.textContent = '';
 
             Object.keys(controllerStates).forEach(key => {
                 const state = controllerStates[key];
@@ -600,7 +630,6 @@
             if (!controller) return;
             const state = controllerStates[controllerName];
             if (state.selectedObject) {
-                // Keep original rotation when grabbed
                 state.selectedObject.quaternion.copy(state.initialRotation);
                 return;
             };
@@ -663,38 +692,39 @@
                     }
                 }
                 if (source.gamepad && source.handedness === 'right') {
-                     const axes = source.gamepad.axes;
-                      if (axes.length >= 4) {
-                         const dollyZ = Math.abs(axes[3]) > 0.1 ? axes[3] : 0;
-                          if (dollyZ !== 0) {
-                            const forward = new THREE.Vector3(0,0,-1);
-                            playerRig.position.add(forward.multiplyScalar(dollyZ * VR_ZOOM_SPEED * delta));
+                   const axes = source.gamepad.axes;
+                    if (axes.length >= 4) {
+                       const dollyZ = Math.abs(axes[3]) > 0.1 ? axes[3] : 0;
+                        if (dollyZ !== 0) {
+                            const forward = new THREE.Vector3(0,0,-1).applyQuaternion(xrCamera.quaternion);
+                            forward.y = 0;
+                            forward.normalize();
+                            playerRig.position.add(forward.multiplyScalar(-dollyZ * VR_ZOOM_SPEED * delta));
                         }
-                     }
+                   }
                 }
             });
         }
         
         function animate() {
             const delta = clock.getDelta();
-            renderer.setAnimationLoop(() => {
-                if (!renderer.xr.isPresenting) {
-                    controls.update();
-                }
-                
-                if (renderer.xr.isPresenting) {
-                    handleController(controller1, 'controller1');
-                    handleController(controller2, 'controller2');
-                    handleVRLocomotion(delta);
-                    const bone1 = controllerStates.controller1.intersectedObject;
-                    const bone2 = controllerStates.controller2.intersectedObject;
-                    const boneName = bone1 ? bone1.userData.name : (bone2 ? bone2.userData.name : '');
-                    const time = timerText.textContent.replace('時間: ','');
-                    updateVRInfoPanel(boneName, time);
-                }
-                
-                renderer.render(scene, camera);
-            });
+            
+            if (!renderer.xr.isPresenting) {
+                controls.update();
+            }
+            
+            if (renderer.xr.isPresenting) {
+                handleController(controller1, 'controller1');
+                handleController(controller2, 'controller2');
+                handleVRLocomotion(delta);
+                const bone1 = controllerStates.controller1.intersectedObject;
+                const bone2 = controllerStates.controller2.intersectedObject;
+                const bone = bone1 ? bone1.userData : (bone2 ? bone2.userData : null);
+                const time = timerText.textContent.replace('時間: ','');
+                updateVRInfoPanel(bone, time);
+            }
+            
+            renderer.render(scene, camera);
         }
 
     </script>
