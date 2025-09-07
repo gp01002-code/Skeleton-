@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>3D人體骨骼拼圖 V5.8 - 最終體驗優化</title>
+    <title>3D人體骨骼拼圖 V6.1 - 背景修復版</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body { margin: 0; overflow: hidden; background-color: #1a202c; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; }
@@ -25,7 +25,7 @@
         .bone-name { min-height: 24px; }
         .button { transition: all 0.2s ease-in-out; }
         .button:hover { transform: scale(1.05); }
-        #completion-message { display: none; transition: opacity 0.5s; }
+        #completion-message, #start-screen { display: none; }
         #VRButton { position: absolute !important; right: 12px; bottom: 12px; z-index: 70; }
     </style>
 </head>
@@ -33,7 +33,12 @@
     <div id="loading-overlay" class="absolute inset-0 z-30 flex items-center justify-center bg-black bg-opacity-70 text-white">
         <p class="text-2xl">模型載入中...</p>
     </div>
-    <div id="info-panel-html" class="info-panel shadow-lg">
+    <div id="start-screen" class="absolute inset-0 z-40 flex-col items-center justify-center bg-gray-900 text-white text-center" style="display: flex;">
+        <h1 class="text-5xl font-bold mb-4">3D人體骨骼拼圖</h1>
+        <p class="text-xl mb-8">一個具教育意義的互動體驗</p>
+        <button id="start-button" class="bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-8 rounded-lg text-2xl button shadow-xl">開始體驗</button>
+    </div>
+    <div id="info-panel-html" class="info-panel shadow-lg" style="display: none;">
         <div class="flex justify-between items-center">
             <h1 class="text-md font-bold text-white whitespace-nowrap">3D人體骨骼拼圖</h1>
             <p id="timer-text" class="text-md text-yellow-300 font-mono ml-2">時間: 00:00</p>
@@ -45,7 +50,7 @@
         <p class="text-2xl mb-8">您已成功拼湊出完整的人體骨骼！</p>
         <button id="play-again-button" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-8 rounded-lg text-xl button shadow-xl">再玩一次</button>
     </div>
-    <button id="reset-button" class="absolute bottom-5 right-5 bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-5 rounded-lg z-10 button shadow-lg">重置</button>
+    <button id="reset-button" class="absolute bottom-5 right-5 bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-5 rounded-lg z-10 button shadow-lg" style="display: none;">重置</button>
 
     <script type="importmap">
     {
@@ -67,13 +72,12 @@
         let raycaster, mouse;
         let selectedObject = null;
         let controller1, controller2;
-        let controllerGrip1, controllerGrip2;
         let playerRig;
         let vrInfoPanel;
         const clock = new THREE.Clock();
         const controllerStates = {
-            controller1: { intersectedObject: null, selectedObject: null, line: null },
-            controller2: { intersectedObject: null, selectedObject: null, line: null }
+            controller1: { intersectedObject: null, selectedObject: null, line: null, initialRotation: new THREE.Quaternion() },
+            controller2: { intersectedObject: null, selectedObject: null, line: null, initialRotation: new THREE.Quaternion() }
         };
         const draggableObjects = [];
         const bonesData = [];
@@ -89,12 +93,13 @@
         const playAgainButton = document.getElementById('play-again-button');
         const loadingOverlay = document.getElementById('loading-overlay');
         const infoPanelHTML = document.getElementById('info-panel-html');
+        const startScreen = document.getElementById('start-screen');
+        const startButton = document.getElementById('start-button');
         
         const sceneScaleFactor = 10;
         const referencePosition = new THREE.Vector3(0, 13.5, 0);
-        const snapDistance = 35; // Increased snap distance
+        const snapDistance = 35;
         const VR_MOVEMENT_SPEED = 25.0;
-        const VR_ZOOM_SPEED = 30.0;
 
         const boneDefinitions = [
             { id: 'pelvis', name: '骨盆', modelUrl: 'https://cdn.jsdelivr.net/gh/gp01002-code/Skeleton-/pelvis.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(80, 0, 0), targetPos: new THREE.Vector3(0, 18, 0) },
@@ -111,11 +116,31 @@
             { id: 'tibia_r', name: '右脛骨', modelUrl: 'https://cdn.jsdelivr.net/gh/gp01002-code/Skeleton-/calf%20bone.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(80, -80, 0), targetPos: new THREE.Vector3(6, -34.5, 0) }
         ];
         
-        init();
+        startButton.addEventListener('click', () => {
+            startScreen.style.display = 'none';
+            loadingOverlay.style.display = 'flex';
+            init();
+        });
 
         function init() {
             scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x1a202c);
+            
+            // **FIX:** Replaced placeholder with the full, correct jsDelivr URL
+            const backgroundUrl = "https://cdn.jsdelivr.net/gh/gp01002-code/Skeleton-/YOUR_IMAGE_URL_HERE.jpg";
+            
+            new THREE.TextureLoader().load(backgroundUrl, 
+                (texture) => {
+                    texture.mapping = THREE.EquirectangularReflectionMapping;
+                    scene.background = texture;
+                    scene.environment = texture;
+                },
+                undefined,
+                () => {
+                    console.warn("背景圖片載入失敗，將使用預設背景。");
+                    scene.background = new THREE.Color(0x1a202c);
+                }
+            );
+            
             camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 1000);
             
             playerRig = new THREE.Group();
@@ -134,6 +159,7 @@
             const vrButton = VRButton.createButton(renderer);
             vrButton.id = 'VRButton';
             document.body.appendChild(vrButton);
+            vrButton.style.display = 'block';
 
             const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
             scene.add(ambientLight);
@@ -157,6 +183,9 @@
             loadFullSkeletonReference();
             createBones();
             createGroundPlane();
+            
+            infoPanelHTML.style.display = 'block';
+            resetButton.style.display = 'block';
 
             window.addEventListener('resize', onWindowResize);
             renderer.domElement.addEventListener('mousedown', onPointerDown);
@@ -203,7 +232,7 @@
             ground.rotation.x = -Math.PI / 2;
             scene.add(ground);
         }
-
+        
         function createVRInfoPanel() {
             const canvas = document.createElement('canvas');
             const context = canvas.getContext('2d');
@@ -220,7 +249,10 @@
         }
 
         function updateVRInfoPanel(boneName, time) {
-            if (!vrInfoPanel || !renderer.xr.isPresenting) return;
+            if (!vrInfoPanel || !renderer.xr.isPresenting) {
+                if(vrInfoPanel) vrInfoPanel.visible = false;
+                return;
+            }
             vrInfoPanel.visible = true;
             const context = vrInfoPanel.userData.context;
             const texture = vrInfoPanel.userData.texture;
@@ -236,7 +268,6 @@
             context.fillText(boneName || '指向骨骼...', 10, 85);
             texture.needsUpdate = true;
         }
-
 
         function onSqueeze(event) {
             if (completionMessage.style.display === 'flex') {
@@ -258,8 +289,7 @@
             if (state.intersectedObject && !state.intersectedObject.userData.placed) {
                 if (otherState.selectedObject !== state.intersectedObject) {
                     state.selectedObject = state.intersectedObject;
-                    // **FIX:** Attach to scene first to get world matrix, then attach to controller
-                    scene.attach(state.selectedObject);
+                    state.initialRotation.copy(state.selectedObject.quaternion);
                     controller.attach(state.selectedObject);
                     vibrate(controller, 0.3, 50);
                 }
@@ -279,8 +309,6 @@
                     state.selectedObject.userData.placed = true;
                     if (state.selectedObject.material) {
                         state.selectedObject.material.color.set(0x50c878);
-                        state.selectedObject.material.emissive.set(0x50c878);
-                        state.selectedObject.material.emissiveIntensity = 0.2;
                     }
                     placedCount++;
                     checkCompletion();
@@ -308,11 +336,6 @@
             controller2.addEventListener('squeeze', onSqueeze);
             playerRig.add(controller2);
 
-            controllerGrip1 = renderer.xr.getControllerGrip(0);
-            playerRig.add(controllerGrip1);
-            controllerGrip2 = renderer.xr.getControllerGrip(1);
-            playerRig.add(controllerGrip2);
-
             const lineGeometry = new THREE.BufferGeometry().setFromPoints([ new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -1) ]);
             const lineMaterial = new THREE.LineBasicMaterial({ color: 0x00ff00 });
             const line1 = new THREE.Line(lineGeometry, lineMaterial.clone());
@@ -323,12 +346,6 @@
             line2.scale.z = 50;
             controller2.add(line2);
             controllerStates.controller2.line = line2;
-            const controllerGeometry = new THREE.BoxGeometry(0.05, 0.05, 0.1);
-            const controllerMaterial = new THREE.MeshStandardMaterial({ color: 0x444444 });
-            const controllerMesh1 = new THREE.Mesh(controllerGeometry, controllerMaterial);
-            controllerGrip1.add(controllerMesh1);
-            const controllerMesh2 = new THREE.Mesh(controllerGeometry, controllerMaterial);
-            controllerGrip2.add(controllerMesh2);
         }
 
         function vibrate(controller, intensity = 0.5, duration = 100) {
@@ -362,7 +379,7 @@
             const loader = new STLLoader();
             loader.load('https://cdn.jsdelivr.net/gh/gp01002-code/Skeleton-/untitled.stl', 
                 (geometry) => {
-                    const material = new THREE.MeshStandardMaterial({ color: 0x00ffff, transparent: true, opacity: 0.25, emissive: new THREE.Color(0x00ffff), emissiveIntensity: 0.1 });
+                    const material = new THREE.MeshStandardMaterial({ color: 0x00ffff, transparent: true, opacity: 0.25 });
                     geometry.computeBoundingBox();
                     const center = geometry.boundingBox.getCenter(new THREE.Vector3());
                     geometry.translate(-center.x, -center.y, -center.z);
@@ -387,15 +404,13 @@
                 const url = def.modelUrl.replace(/ /g, '%20');
                 stlLoader.load(url, 
                     (geometry) => {
-                        const material = new THREE.MeshStandardMaterial({ color: 0xebe5d1, roughness: 0.3, metalness: 0.1, emissive: new THREE.Color(0x000000) });
+                        const material = new THREE.MeshStandardMaterial({ color: 0xebe5d1, roughness: 0.3, metalness: 0.1 });
                         geometry.computeBoundingBox();
                         const center = geometry.boundingBox.getCenter(new THREE.Vector3());
                         geometry.translate(-center.x, -center.y, -center.z);
                         const mesh = new THREE.Mesh(geometry, material);
                         mesh.scale.set(def.scale, def.scale, def.scale);
                         mesh.rotation.x = -Math.PI / 2;
-                        mesh.castShadow = true;
-                        mesh.receiveShadow = true;
                         setupBone(mesh, def);
                         modelLoaded();
                     }, 
@@ -412,10 +427,12 @@
             mesh.userData = { id: def.id, name: def.name, type: 'draggable', placed: false, initialPos: def.initialPos.clone(), targetPos: def.targetPos };
             
             const hitbox = new THREE.Mesh(
-                mesh.geometry.clone(),
-                new THREE.MeshBasicMaterial({ visible: false })
+                new THREE.BoxGeometry(1, 1, 1),
+                new THREE.MeshBasicMaterial({ visible: false, wireframe: true })
             );
-            hitbox.scale.multiplyScalar(1.5);
+            const bbox = new THREE.Box3().setFromObject(mesh);
+            const size = bbox.getSize(new THREE.Vector3());
+            hitbox.scale.copy(size).multiplyScalar(1.5);
             mesh.add(hitbox);
 
             scene.add(mesh);
@@ -460,33 +477,21 @@
             updatePointerPosition(event);
             let foundBone = null;
             if (selectedObject) {
-                const planeNormal = new THREE.Vector3();
-                camera.getWorldDirection(planeNormal).normalize();
-                const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(planeNormal, referencePosition);
-                const ndc = new THREE.Vector3(mouse.x, mouse.y, 0.5);
-                ndc.unproject(camera);
-                const rayDir = ndc.sub(camera.position).normalize();
-                const ray = new THREE.Ray(camera.getWorldPosition(new THREE.Vector3()), rayDir);
-                const hit = new THREE.Vector3();
-                if (ray.intersectPlane(plane, hit)) {
-                    selectedObject.position.copy(hit);
-                }
+                const planeNormal = new THREE.Vector3(0, 0, 1);
+                planeNormal.applyQuaternion(camera.quaternion);
+                const plane = new THREE.Plane(planeNormal, 0);
+                const ray = new THREE.Ray();
+                raycaster.setFromCamera(mouse, camera);
+                raycaster.ray.intersectPlane(plane, selectedObject.position);
                 foundBone = selectedObject.userData;
             } else {
                 raycaster.setFromCamera(mouse, camera);
                 const intersects = raycaster.intersectObjects(draggableObjects, true);
-                draggableObjects.forEach(obj => {
-                    if (obj.material && !obj.userData.placed) obj.material.emissive.set(0x000000);
-                });
                 if (intersects.length > 0) {
                     let object = intersects[0].object;
                     while (object.parent && !object.userData.type) object = object.parent;
                     if (object.userData.name && !object.userData.placed) {
                         foundBone = object.userData;
-                        if (object.material) {
-                            object.material.emissive.set(0xffffff);
-                            object.material.emissiveIntensity = 0.1;
-                        }
                     }
                 }
             }
@@ -511,8 +516,6 @@
                     selectedObject.userData.placed = true;
                     if (selectedObject.material) {
                         selectedObject.material.color.set(0x50c878);
-                        selectedObject.material.emissive.set(0x50c878);
-                        selectedObject.material.emissiveIntensity = 0.2;
                     }
                     placedCount++;
                     updatePlacedCount();
@@ -568,8 +571,8 @@
             const elapsedTime = Math.floor((Date.now() - startTime) / 1000);
             const minutes = Math.floor(elapsedTime / 60).toString().padStart(2, '0');
             const seconds = (elapsedTime % 60).toString().padStart(2, '0');
-            const timeString = `時間: ${minutes}:${seconds}`;
-            timerText.textContent = timeString;
+            const timeString = `${minutes}:${seconds}`;
+            timerText.textContent = `時間: ${timeString}`;
         }
         function resetGame() {
             completionMessage.style.display = 'none';
@@ -589,8 +592,6 @@
                 bone.position.copy(bone.userData.initialPos);
                 if (bone.material) {
                     bone.material.color.set(0xebe5d1);
-                    bone.material.emissive.set(0x000000);
-                    bone.material.emissiveIntensity = 0;
                 }
             });
         }
@@ -598,7 +599,12 @@
         function handleController(controller, controllerName) {
             if (!controller) return;
             const state = controllerStates[controllerName];
-            if (state.selectedObject) return;
+            if (state.selectedObject) {
+                // Keep original rotation when grabbed
+                state.selectedObject.quaternion.copy(state.initialRotation);
+                return;
+            };
+
             const intersections = getIntersections(controller);
             const line = state.line;
             let foundBone = null;
@@ -635,55 +641,60 @@
         function handleVRLocomotion(delta) {
             const xrCamera = renderer.xr.getCamera();
             if (!playerRig) return;
-            if (controller1 && controller1.userData && controller1.userData.inputSource) {
-                const leftSource = controller1.userData.inputSource;
-                if (leftSource.gamepad && leftSource.gamepad.axes && leftSource.gamepad.axes.length > 3) {
-                    const axes = leftSource.gamepad.axes;
-                    const moveZ = Math.abs(axes[3]) > 0.1 ? axes[3] : 0;
-                    const moveX = Math.abs(axes[2]) > 0.1 ? axes[2] : 0;
-                    if (moveZ !== 0 || moveX !== 0) {
-                        const quaternion = xrCamera.quaternion;
-                        const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(quaternion);
-                        forward.y = 0; forward.normalize();
-                        const right = new THREE.Vector3(1, 0, 0).applyQuaternion(quaternion);
-                        right.y = 0; right.normalize();
-                        playerRig.position.add(forward.multiplyScalar(VR_MOVEMENT_SPEED * -moveZ * delta));
-                        playerRig.position.add(right.multiplyScalar(VR_MOVEMENT_SPEED * moveX * delta));
+            const session = renderer.xr.getSession();
+            if(!session || !session.inputSources) return;
+
+            session.inputSources.forEach(source => {
+                if (source.gamepad && source.handedness === 'left') {
+                    const axes = source.gamepad.axes;
+                    if (axes.length >= 4) {
+                        const moveX = Math.abs(axes[2]) > 0.1 ? axes[2] : 0;
+                        const moveZ = Math.abs(axes[3]) > 0.1 ? axes[3] : 0;
+                        if (moveZ !== 0 || moveX !== 0) {
+                            const forward = new THREE.Vector3(0,0,-1).applyQuaternion(xrCamera.quaternion);
+                            const right = new THREE.Vector3(1,0,0).applyQuaternion(xrCamera.quaternion);
+                            forward.y = 0;
+                            right.y = 0;
+                            forward.normalize();
+                            right.normalize();
+                            playerRig.position.add(forward.multiplyScalar(-moveZ * VR_MOVEMENT_SPEED * delta));
+                            playerRig.position.add(right.multiplyScalar(moveX * VR_MOVEMENT_SPEED * delta));
+                        }
                     }
                 }
-            }
-            if (controller2 && controller2.userData && controller2.userData.inputSource) {
-                const rightSource = controller2.userData.inputSource;
-                if (rightSource.gamepad && rightSource.gamepad.axes && rightSource.gamepad.axes.length > 3) {
-                    const axes = rightSource.gamepad.axes;
-                    const dolly = Math.abs(axes[3]) > 0.1 ? axes[3] : 0;
-                    if (dolly !== 0) {
-                        const dollyDirection = new THREE.Vector3();
-                        xrCamera.getWorldDirection(dollyDirection);
-                        playerRig.position.add(dollyDirection.multiplyScalar(VR_ZOOM_SPEED * -dolly * delta));
-                    }
+                if (source.gamepad && source.handedness === 'right') {
+                     const axes = source.gamepad.axes;
+                      if (axes.length >= 4) {
+                         const dollyZ = Math.abs(axes[3]) > 0.1 ? axes[3] : 0;
+                          if (dollyZ !== 0) {
+                            const forward = new THREE.Vector3(0,0,-1);
+                            playerRig.position.add(forward.multiplyScalar(dollyZ * VR_ZOOM_SPEED * delta));
+                        }
+                     }
                 }
-            }
+            });
         }
         
         function animate() {
             const delta = clock.getDelta();
-            if (!renderer.xr.isPresenting) {
-                controls.update();
-            }
-            
-            if (renderer.xr.isPresenting) {
-                handleController(controller1, 'controller1');
-                handleController(controller2, 'controller2');
-                handleVRLocomotion(delta);
-                const bone1 = controllerStates.controller1.intersectedObject;
-                const bone2 = controllerStates.controller2.intersectedObject;
-                const boneName = bone1 ? bone1.userData.name : (bone2 ? bone2.userData.name : '');
-                const time = timerText.textContent.replace('時間: ','');
-                updateVRInfoPanel(boneName, time);
-            }
-            
-            renderer.render(scene, camera);
+            renderer.setAnimationLoop(() => {
+                if (!renderer.xr.isPresenting) {
+                    controls.update();
+                }
+                
+                if (renderer.xr.isPresenting) {
+                    handleController(controller1, 'controller1');
+                    handleController(controller2, 'controller2');
+                    handleVRLocomotion(delta);
+                    const bone1 = controllerStates.controller1.intersectedObject;
+                    const bone2 = controllerStates.controller2.intersectedObject;
+                    const boneName = bone1 ? bone1.userData.name : (bone2 ? bone2.userData.name : '');
+                    const time = timerText.textContent.replace('時間: ','');
+                    updateVRInfoPanel(boneName, time);
+                }
+                
+                renderer.render(scene, camera);
+            });
         }
 
     </script>
