@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>3D人體骨骼拼圖 V5.7 - 最終體驗優化</title>
+    <title>3D人體骨骼拼圖 V5.8 - 最終體驗優化</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body { margin: 0; overflow: hidden; background-color: #1a202c; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; }
@@ -69,10 +69,11 @@
         let controller1, controller2;
         let controllerGrip1, controllerGrip2;
         let playerRig;
+        let vrInfoPanel;
         const clock = new THREE.Clock();
         const controllerStates = {
-            controller1: { intersectedObject: null, selectedObject: null, line: null, initialOffset: new THREE.Vector3() },
-            controller2: { intersectedObject: null, selectedObject: null, line: null, initialOffset: new THREE.Vector3() }
+            controller1: { intersectedObject: null, selectedObject: null, line: null },
+            controller2: { intersectedObject: null, selectedObject: null, line: null }
         };
         const draggableObjects = [];
         const bonesData = [];
@@ -80,7 +81,6 @@
         let placedCount = 0;
         let startTime = null;
         let timerInterval = null;
-        let lastDebugUpdate = performance.now();
         
         const boneNameText = document.getElementById('bone-name-text');
         const timerText = document.getElementById('timer-text');
@@ -92,7 +92,7 @@
         
         const sceneScaleFactor = 10;
         const referencePosition = new THREE.Vector3(0, 13.5, 0);
-        const snapDistance = 20;
+        const snapDistance = 35; // Increased snap distance
         const VR_MOVEMENT_SPEED = 25.0;
         const VR_ZOOM_SPEED = 30.0;
 
@@ -152,6 +152,7 @@
             raycaster = new THREE.Raycaster();
             mouse = new THREE.Vector2();
             
+            createVRInfoPanel();
             setupVRControllers();
             loadFullSkeletonReference();
             createBones();
@@ -172,10 +173,6 @@
             
             renderer.xr.addEventListener('sessionstart', onVRSessionStart);
             renderer.xr.addEventListener('sessionend', onVRSessionEnd);
-
-            if (!window.isSecureContext) console.warn('⚠️ WebXR 需要 HTTPS，請用 https:// 網址開啟此頁面。');
-            if (!('xr' in navigator)) console.warn('⚠️ 這個瀏覽器不支援 WebXR。');
-            else navigator.xr.isSessionSupported('immersive-vr').then(supported => { if (!supported) console.warn('⚠️ 此裝置/瀏覽器不支援 immersive-vr。'); });
         }
 
         function onVRSessionStart() {
@@ -207,6 +204,40 @@
             scene.add(ground);
         }
 
+        function createVRInfoPanel() {
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+            canvas.width = 512;
+            canvas.height = 128;
+            const texture = new THREE.CanvasTexture(canvas);
+            const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true, side: THREE.DoubleSide });
+            const geometry = new THREE.PlaneGeometry(50, 12.5);
+            vrInfoPanel = new THREE.Mesh(geometry, material);
+            vrInfoPanel.position.set(0, 25, -40);
+            vrInfoPanel.userData.context = context;
+            vrInfoPanel.userData.texture = texture;
+            playerRig.add(vrInfoPanel);
+        }
+
+        function updateVRInfoPanel(boneName, time) {
+            if (!vrInfoPanel || !renderer.xr.isPresenting) return;
+            vrInfoPanel.visible = true;
+            const context = vrInfoPanel.userData.context;
+            const texture = vrInfoPanel.userData.texture;
+            context.fillStyle = 'rgba(0, 0, 0, 0.7)';
+            context.fillRect(0, 0, 512, 128);
+            context.fillStyle = 'white';
+            context.font = 'bold 24px sans-serif';
+            context.fillText('3D人體骨骼拼圖', 10, 30);
+            context.font = '24px monospace';
+            context.fillText(`時間: ${time}`, 350, 30);
+            context.fillStyle = '#00ffff';
+            context.font = 'bold 30px sans-serif';
+            context.fillText(boneName || '指向骨骼...', 10, 85);
+            texture.needsUpdate = true;
+        }
+
+
         function onSqueeze(event) {
             if (completionMessage.style.display === 'flex') {
                 resetGame();
@@ -227,6 +258,7 @@
             if (state.intersectedObject && !state.intersectedObject.userData.placed) {
                 if (otherState.selectedObject !== state.intersectedObject) {
                     state.selectedObject = state.intersectedObject;
+                    // **FIX:** Attach to scene first to get world matrix, then attach to controller
                     scene.attach(state.selectedObject);
                     controller.attach(state.selectedObject);
                     vibrate(controller, 0.3, 50);
@@ -251,9 +283,8 @@
                         state.selectedObject.material.emissiveIntensity = 0.2;
                     }
                     placedCount++;
-                    updatePlacedCount();
-                    vibrate(controller, 1.0, 200);
                     checkCompletion();
+                    vibrate(controller, 1.0, 200);
                 } else {
                     state.selectedObject.position.copy(state.selectedObject.userData.initialPos);
                     vibrate(controller, 0.2, 50);
@@ -384,7 +415,7 @@
                 mesh.geometry.clone(),
                 new THREE.MeshBasicMaterial({ visible: false })
             );
-            hitbox.scale.set(1.5, 1.5, 1.5);
+            hitbox.scale.multiplyScalar(1.5);
             mesh.add(hitbox);
 
             scene.add(mesh);
@@ -645,6 +676,11 @@
                 handleController(controller1, 'controller1');
                 handleController(controller2, 'controller2');
                 handleVRLocomotion(delta);
+                const bone1 = controllerStates.controller1.intersectedObject;
+                const bone2 = controllerStates.controller2.intersectedObject;
+                const boneName = bone1 ? bone1.userData.name : (bone2 ? bone2.userData.name : '');
+                const time = timerText.textContent.replace('時間: ','');
+                updateVRInfoPanel(boneName, time);
             }
             
             renderer.render(scene, camera);
