@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>3D人體骨骼拼圖 V5.6 - 變數修復版</title>
+    <title>3D人體骨骼拼圖 V5.7 - 最終體驗優化</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body { margin: 0; overflow: hidden; background-color: #1a202c; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; }
@@ -61,6 +61,7 @@
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
         import { STLLoader } from 'three/addons/loaders/STLLoader.js';
         import { VRButton } from 'three/addons/webxr/VRButton.js';
+        import { Reflector } from 'three/addons/objects/Reflector.js';
 
         let scene, camera, renderer, controls;
         let raycaster, mouse;
@@ -70,8 +71,8 @@
         let playerRig;
         const clock = new THREE.Clock();
         const controllerStates = {
-            controller1: { intersectedObject: null, selectedObject: null, line: null },
-            controller2: { intersectedObject: null, selectedObject: null, line: null }
+            controller1: { intersectedObject: null, selectedObject: null, line: null, initialOffset: new THREE.Vector3() },
+            controller2: { intersectedObject: null, selectedObject: null, line: null, initialOffset: new THREE.Vector3() }
         };
         const draggableObjects = [];
         const bonesData = [];
@@ -193,12 +194,16 @@
         }
 
         function createGroundPlane() {
-            const geometry = new THREE.PlaneGeometry(500, 500);
-            const material = new THREE.MeshStandardMaterial({ color: 0x202020, roughness: 0.8, metalness: 0.2 });
-            const ground = new THREE.Mesh(geometry, material);
-            ground.rotation.x = -Math.PI / 2;
+            const groundGeometry = new THREE.CircleGeometry(250, 64);
+            const ground = new Reflector(groundGeometry, {
+                clipBias: 0.003,
+                textureWidth: window.innerWidth * window.devicePixelRatio,
+                textureHeight: window.innerHeight * window.devicePixelRatio,
+                color: 0x333333,
+                recursion: 1
+            });
             ground.position.y = -100;
-            ground.receiveShadow = true;
+            ground.rotation.x = -Math.PI / 2;
             scene.add(ground);
         }
 
@@ -222,6 +227,7 @@
             if (state.intersectedObject && !state.intersectedObject.userData.placed) {
                 if (otherState.selectedObject !== state.intersectedObject) {
                     state.selectedObject = state.intersectedObject;
+                    scene.attach(state.selectedObject);
                     controller.attach(state.selectedObject);
                     vibrate(controller, 0.3, 50);
                 }
@@ -373,6 +379,14 @@
         function setupBone(mesh, def) {
             mesh.position.copy(def.initialPos);
             mesh.userData = { id: def.id, name: def.name, type: 'draggable', placed: false, initialPos: def.initialPos.clone(), targetPos: def.targetPos };
+            
+            const hitbox = new THREE.Mesh(
+                mesh.geometry.clone(),
+                new THREE.MeshBasicMaterial({ visible: false })
+            );
+            hitbox.scale.set(1.5, 1.5, 1.5);
+            mesh.add(hitbox);
+
             scene.add(mesh);
             draggableObjects.push(mesh);
             bonesData.push(mesh);
