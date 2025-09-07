@@ -999,3 +999,945 @@
 </body>
 </html>
 
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D人體骨骼拼圖 V4.9 - 變數修復版</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #1a202c; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; }
+        canvas { display: block; }
+        .info-panel {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            border-radius: 12px;
+            backdrop-filter: blur(5px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            z-index: 10;
+        }
+        .bone-name { min-height: 28px; }
+        .button { transition: all 0.2s ease-in-out; }
+        .button:hover { transform: scale(1.05); }
+        .button:disabled { opacity: 0.5; cursor: not-allowed; }
+        #completion-message { display: none; transition: opacity 0.5s; }
+        .debug-panel { position: absolute; bottom: 20px; left: 20px; background: rgba(0,0,0,0.5); color: #0f0; padding: 10px; font-family: monospace; font-size: 12px; display: none; z-index: 11; }
+        .loader { border: 3px solid #f3f3f3; border-top: 3px solid #3498db; border-radius: 50%; width: 20px; height: 20px; animation: spin 1s linear infinite; }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div id="loading-overlay" class="absolute inset-0 z-30 flex items-center justify-center bg-black bg-opacity-70 text-white">
+        <p class="text-2xl">模型載入中...</p>
+    </div>
+    <div id="info-panel-html" class="info-panel shadow-lg p-3 sm:p-4 max-w-[280px] sm:max-w-xs">
+        <h1 class="text-xl sm:text-2xl font-bold text-white">3D人體骨骼拼圖</h1>
+        <div class="flex items-center justify-between mt-2">
+            <p id="bone-name-text" class="text-lg sm:text-xl text-cyan-300 font-semibold bone-name"></p>
+            <button id="speak-button" class="p-1 rounded-full hover:bg-gray-700 disabled:hover:bg-transparent" style="display: none;">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>
+            </button>
+        </div>
+        <div id="gemini-content-area" class="mt-1 text-xs sm:text-sm text-gray-300 h-24 overflow-y-auto border-t border-gray-700 pt-2">
+             <p id="bone-description-text">將滑鼠或控制器指向一塊骨骼以查看資訊。</p>
+        </div>
+        <button id="gemini-button" class="mt-2 w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg text-sm button flex items-center justify-center gap-2" style="display: none;">
+             ✨ 深入了解 (AI)
+        </button>
+        <p id="timer-text" class="mt-2 text-xl sm:text-2xl text-yellow-300 font-mono">時間: 00:00</p>
+        <p id="placed-count" class="mt-1 text-base sm:text-lg text-green-300">已放置: 0/12</p>
+    </div>
+    <div id="completion-message" class="absolute inset-0 z-20 flex-col items-center justify-center bg-black bg-opacity-80 text-white text-center">
+        <h2 class="text-6xl font-bold mb-4 animate-pulse">恭喜！</h2>
+        <p class="text-2xl mb-8">您已成功拼湊出完整的人體骨骼！</p>
+        <button id="play-again-button" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-8 rounded-lg text-xl button shadow-xl">
+            再玩一次
+        </button>
+    </div>
+    <button id="reset-button" class="absolute bottom-5 right-5 bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-5 rounded-lg z-10 button shadow-lg">
+        重置
+    </button>
+    <div id="debug-panel" class="debug-panel">
+        <pre id="debug-info">Debug Info</pre>
+    </div>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { STLLoader } from 'three/addons/loaders/STLLoader.js';
+        import { VRButton } from 'three/addons/webxr/VRButton.js';
+
+        let audioContext;
+        let isGenerating = false;
+        let isSpeaking = false;
+        let lastHoveredBoneName = null;
+        let scene, camera, renderer, controls;
+        let raycaster, mouse;
+        let selectedObject = null;
+        let controller1, controller2;
+        let controllerGrip1, controllerGrip2;
+        let playerRig;
+        const clock = new THREE.Clock();
+        const controllerStates = {
+            controller1: { intersectedObject: null, selectedObject: null, line: null },
+            controller2: { intersectedObject: null, selectedObject: null, line: null }
+        };
+        const draggableObjects = [];
+        const bonesData = [];
+        let modelsToLoad = 0;
+        let placedCount = 0;
+        let startTime = null;
+        let timerInterval = null;
+        let vrInfoPanel;
+        let vrCompletionPanel;
+        let lastVRPanelUpdate = 0;
+        const VR_PANEL_UPDATE_INTERVAL = 100;
+        let lastDebugUpdate = performance.now(); // **FIX:** Initialize here
+
+        const boneNameText = document.getElementById('bone-name-text');
+        const boneDescriptionText = document.getElementById('bone-description-text');
+        const timerText = document.getElementById('timer-text');
+        const placedCountText = document.getElementById('placed-count');
+        const completionMessage = document.getElementById('completion-message');
+        const resetButton = document.getElementById('reset-button');
+        const playAgainButton = document.getElementById('play-again-button');
+        const loadingOverlay = document.getElementById('loading-overlay');
+        const geminiButton = document.getElementById('gemini-button');
+        const speakButton = document.getElementById('speak-button');
+        const debugPanel = document.getElementById('debug-panel');
+        const debugInfo = document.getElementById('debug-info');
+        const infoPanelHTML = document.getElementById('info-panel-html');
+
+        const sceneScaleFactor = 10;
+        const referencePosition = new THREE.Vector3(0, 13.5, 0);
+        const snapDistance = 25;
+        const VR_MOVEMENT_SPEED = 25.0;
+        const VR_ZOOM_SPEED = 30.0;
+
+        const boneDefinitions = [
+            { id: 'pelvis', name: '骨盆', description: '連接脊柱和下肢，支撐腹部器官的盆狀骨骼。', modelUrl: 'https://cdn.jsdelivr.net/gh/gp01002-code/Skeleton-/pelvis.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(80, 0, 0), targetPos: new THREE.Vector3(0, 18, 0) },
+            { id: 'spinal_cord', name: '脊柱', description: '由一系列椎骨組成，保護脊髓並支撐上半身。', modelUrl: 'https://cdn.jsdelivr.net/gh/gp01002-code/Skeleton-/spinal%20cord.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(0, -80, 0), targetPos: new THREE.Vector3(0, 43.5, -2) },
+            { id: 'chest', name: '胸腔', description: '由肋骨和胸骨構成，保護心臟和肺部等重要器官。', modelUrl: 'https://cdn.jsdelivr.net/gh/gp01002-code/Skeleton-/chest.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(0, 90, 0), targetPos: new THREE.Vector3(0, 44, 0) },
+            { id: 'skull', name: '頭骨', description: '保護大腦並構成臉部結構的骨骼。', modelUrl: 'https://cdn.jsdelivr.net/gh/gp01002-code/Skeleton-/head.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(-80, 50, 0), targetPos: new THREE.Vector3(0, 70.5, -1) },
+            { id: 'humerus_l', name: '左肱骨', description: '位於上臂，連接肩部和肘部的長骨。', modelUrl: 'https://cdn.jsdelivr.net/gh/gp01002-code/Skeleton-/upperarm02.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(-95, 30, 0), targetPos: new THREE.Vector3(-11, 43.5, -2) },
+            { id: 'humerus_r', name: '右肱骨', description: '位於上臂，連接肩部和肘部的長骨。', modelUrl: 'https://cdn.jsdelivr.net/gh/gp01002-code/Skeleton-/upperarm.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(95, 30, 0), targetPos: new THREE.Vector3(11, 43.5, -2) },
+            { id: 'radius_ulna_l', name: '左前臂骨', description: '由橈骨和尺骨組成，連接肘部和手腕。', modelUrl: 'https://cdn.jsdelivr.net/gh/gp01002-code/Skeleton-/forearm02.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(-95, -20, 0), targetPos: new THREE.Vector3(-22, 15, 2) },
+            { id: 'radius_ulna_r', name: '右前臂骨', description: '由橈骨和尺骨組成，連接肘部和手腕。', modelUrl: 'https://cdn.jsdelivr.net/gh/gp01002-code/Skeleton-/forearm.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(95, -20, 0), targetPos: new THREE.Vector3(22, 15, 2) },
+            { id: 'femur_l', name: '左股骨', description: '人體中最長、最堅固的骨骼，位於大腿。', modelUrl: 'https://cdn.jsdelivr.net/gh/gp01002-code/Skeleton-/thighbone02.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(-80, -50, 0), targetPos: new THREE.Vector3(-8, 0.5, 0) },
+            { id: 'femur_r', name: '右股骨', description: '人體中最長、最堅固的骨骼，位於大腿。', modelUrl: 'https://cdn.jsdelivr.net/gh/gp01002-code/Skeleton-/thighbone.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(80, -50, 0), targetPos: new THREE.Vector3(8, 0.5, 0) },
+            { id: 'tibia_l', name: '左脛骨', description: '位於小腿內側的主要承重骨，俗稱小腿骨。', modelUrl: 'https://cdn.jsdelivr.net/gh/gp01002-code/Skeleton-/calf%20bone%2002.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(-80, -80, 0), targetPos: new THREE.Vector3(-6, -34.5, 0) },
+            { id: 'tibia_r', name: '右脛骨', description: '位於小腿內側的主要承重骨，俗稱小腿骨。', modelUrl: 'https://cdn.jsdelivr.net/gh/gp01002-code/Skeleton-/calf%20bone.stl', scale: 0.35 * sceneScaleFactor, initialPos: new THREE.Vector3(80, -80, 0), targetPos: new THREE.Vector3(6, -34.5, 0) }
+        ];
+        
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'd' || e.key === 'D') {
+                if(debugPanel) debugPanel.style.display = debugPanel.style.display === 'none' ? 'block' : 'none';
+            }
+        });
+        
+        init();
+
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x1a202c);
+            camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 1000);
+            
+            playerRig = new THREE.Group();
+            scene.add(playerRig);
+            playerRig.add(camera);
+            camera.position.set(0, 50, 250);
+
+            renderer = new THREE.WebGLRenderer({ 
+                antialias: true,
+                powerPreference: "high-performance"
+            });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.xr.enabled = true;
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            document.body.appendChild(renderer.domElement);
+            
+            const vrButton = VRButton.createButton(renderer);
+            document.body.appendChild(vrButton);
+
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+            scene.add(ambientLight);
+            
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 1.2);
+            directionalLight.position.set(50, 100, 75);
+            directionalLight.castShadow = true;
+            directionalLight.shadow.mapSize.width = 2048;
+            directionalLight.shadow.mapSize.height = 2048;
+            scene.add(directionalLight);
+            
+            const pointLight = new THREE.PointLight(0xffffff, 0.5);
+            pointLight.position.set(0, 50, 50);
+            scene.add(pointLight);
+            
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.target.set(referencePosition.x, referencePosition.y, referencePosition.z);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            
+            raycaster = new THREE.Raycaster();
+            mouse = new THREE.Vector2();
+            
+            createVRInfoPanel();
+            createVRCompletionPanel();
+            setupVRControllers();
+            loadFullSkeletonReference();
+            createBones();
+            createGroundPlane();
+
+            window.addEventListener('resize', onWindowResize);
+            renderer.domElement.addEventListener('mousedown', onPointerDown);
+            renderer.domElement.addEventListener('mousemove', onPointerMove);
+            renderer.domElement.addEventListener('mouseup', onPointerUp);
+            renderer.domElement.addEventListener('touchstart', onPointerDown, { passive: false });
+            renderer.domElement.addEventListener('touchmove', onPointerMove, { passive: false });
+            renderer.domElement.addEventListener('touchend', onPointerUp);
+            
+            resetButton.addEventListener('click', resetGame);
+            playAgainButton.addEventListener('click', resetGame);
+            
+            renderer.setAnimationLoop(animate);
+            
+            renderer.xr.addEventListener('sessionstart', onVRSessionStart);
+            renderer.xr.addEventListener('sessionend', onVRSessionEnd);
+        }
+
+        function onVRSessionStart() {
+            infoPanelHTML.style.display = 'none';
+            playerRig.position.set(0, 0, 200);
+            const session = renderer.xr.getSession();
+            if (session) {
+                 session.addEventListener('inputsourceschange', () => {
+                    const inputSources = session.inputSources;
+                    if (inputSources.length > 0) controller1.userData.inputSource = inputSources[0];
+                    if (inputSources.length > 1) controller2.userData.inputSource = inputSources[1];
+                });
+                session.requestReferenceSpace('local-floor').then(refSpace => {
+                    renderer.xr.setReferenceSpace(refSpace);
+                });
+            }
+        }
+
+        function onVRSessionEnd() {
+            infoPanelHTML.style.display = 'block';
+            playerRig.position.set(0, 0, 0);
+            camera.position.set(0, 50, 250);
+            controls.target.copy(referencePosition);
+            controls.update();
+            Object.keys(controllerStates).forEach(key => {
+                const state = controllerStates[key];
+                if (state.intersectedObject && state.intersectedObject.material) {
+                    state.intersectedObject.material.emissive.set(0x000000);
+                }
+                state.intersectedObject = null;
+                state.selectedObject = null;
+            });
+        }
+
+        function createGroundPlane() {
+            const geometry = new THREE.PlaneGeometry(500, 500);
+            const material = new THREE.MeshStandardMaterial({ color: 0x202020, roughness: 0.8, metalness: 0.2 });
+            const ground = new THREE.Mesh(geometry, material);
+            ground.rotation.x = -Math.PI / 2;
+            ground.position.y = -100;
+            ground.receiveShadow = true;
+            scene.add(ground);
+        }
+
+        function createVRInfoPanel() {
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+            canvas.width = 1024; canvas.height = 512;
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.minFilter = THREE.LinearFilter; texture.magFilter = THREE.LinearFilter;
+            const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true, side: THREE.DoubleSide, depthTest: false });
+            const geometry = new THREE.PlaneGeometry(60, 30);
+            vrInfoPanel = new THREE.Mesh(geometry, material);
+            vrInfoPanel.position.set(0, 55, -70);
+            vrInfoPanel.rotation.x = -0.2;
+            vrInfoPanel.renderOrder = 999;
+            vrInfoPanel.userData.ctx = context;
+            playerRig.add(vrInfoPanel);
+        }
+
+        function createVRCompletionPanel() {
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+            canvas.width = 1024; canvas.height = 512;
+            const texture = new THREE.CanvasTexture(canvas);
+            const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true, side: THREE.DoubleSide, depthTest: false });
+            const geometry = new THREE.PlaneGeometry(80, 40);
+            vrCompletionPanel = new THREE.Mesh(geometry, material);
+            vrCompletionPanel.position.set(0, 40, -60);
+            vrCompletionPanel.renderOrder = 1000;
+            vrCompletionPanel.userData.ctx = context;
+            playerRig.add(vrCompletionPanel);
+        }
+
+        function updateVRInfoPanel(boneText, timeText, countText, force = false) {
+            if (!vrInfoPanel) return;
+            vrInfoPanel.visible = renderer.xr.isPresenting;
+            if (!renderer.xr.isPresenting) return;
+            const now = Date.now();
+            if (!force && now - lastVRPanelUpdate < 100) return;
+            lastVRPanelUpdate = now;
+            const context = vrInfoPanel.userData.ctx;
+            const texture = vrInfoPanel.material.map;
+            const width = 1024, height = 512;
+            context.clearRect(0, 0, width, height);
+            const gradient = context.createLinearGradient(0, 0, 0, height);
+            gradient.addColorStop(0, 'rgba(0, 0, 0, 0.9)');
+            gradient.addColorStop(1, 'rgba(0, 0, 0, 0.7)');
+            context.fillStyle = gradient;
+            context.fillRect(0, 0, width, height);
+            context.strokeStyle = 'rgba(0, 255, 255, 0.5)';
+            context.lineWidth = 4;
+            context.strokeRect(10, 10, width - 20, height - 20);
+            context.fillStyle = 'white';
+            context.font = 'bold 60px sans-serif';
+            context.fillText('3D人體骨骼拼圖', 40, 100);
+            context.fillStyle = '#00ffff';
+            context.font = 'bold 70px sans-serif';
+            context.fillText(boneText || '請選擇骨骼', 40, 220);
+            context.fillStyle = '#ffff00';
+            context.font = '60px monospace';
+            context.fillText(timeText, 40, 340);
+            context.fillStyle = '#00ff00';
+            context.font = '50px sans-serif';
+            context.fillText(countText, 40, 440);
+            texture.needsUpdate = true;
+        }
+
+        function updateVRCompletionPanel(timeText) {
+            if (!vrCompletionPanel) return;
+            vrCompletionPanel.visible = true;
+            const context = vrCompletionPanel.userData.ctx;
+            const texture = vrCompletionPanel.material.map;
+            context.clearRect(0, 0, 1024, 512);
+            context.fillStyle = 'rgba(0, 0, 0, 0.9)';
+            context.fillRect(0, 0, 1024, 512);
+            context.fillStyle = '#00ff00';
+            context.font = 'bold 100px sans-serif';
+            context.textAlign = 'center';
+            context.fillText('恭喜完成！', 512, 200);
+            context.fillStyle = '#ffff00';
+            context.font = '60px sans-serif';
+            context.fillText(timeText, 512, 320);
+            context.fillStyle = 'white';
+            context.font = '40px sans-serif';
+            context.fillText('按下扳機鍵重新開始', 512, 420);
+            context.textAlign = 'left';
+            texture.needsUpdate = true;
+        }
+        
+        function onSqueeze(event) {
+            if (vrCompletionPanel && vrCompletionPanel.visible) {
+                resetGame();
+            }
+        }
+
+        function onSelectStart(event) {
+            if (vrCompletionPanel && vrCompletionPanel.visible) {
+                resetGame();
+                return;
+            }
+            if (!startTime) startTimer();
+            const controller = event.target;
+            const controllerName = controller.name;
+            const state = controllerStates[controllerName];
+            const otherControllerName = controllerName === 'controller1' ? 'controller2' : 'controller1';
+            const otherState = controllerStates[otherControllerName];
+            if (state.intersectedObject && !state.intersectedObject.userData.placed) {
+                if (otherState.selectedObject !== state.intersectedObject) {
+                    state.selectedObject = state.intersectedObject;
+                    controller.attach(state.selectedObject);
+                    vibrate(controller, 0.3, 50);
+                    const currentTimeText = timerText.textContent;
+                    updateVRInfoPanel(state.selectedObject.userData.name, currentTimeText, `已放置: ${placedCount}/12`, true);
+                }
+            }
+        }
+
+        function onSelectEnd(event) {
+            const controller = event.target;
+            const controllerName = controller.name;
+            const state = controllerStates[controllerName];
+            if (state.selectedObject) {
+                scene.attach(state.selectedObject);
+                const targetPos = state.selectedObject.userData.targetPos;
+                const distance = state.selectedObject.position.distanceTo(targetPos);
+                if (distance < snapDistance) {
+                    state.selectedObject.position.copy(targetPos);
+                    state.selectedObject.userData.placed = true;
+                    if (state.selectedObject.material) {
+                        state.selectedObject.material.color.set(0x50c878);
+                        state.selectedObject.material.emissive.set(0x50c878);
+                        state.selectedObject.material.emissiveIntensity = 0.2;
+                    }
+                    placedCount++;
+                    updatePlacedCount();
+                    vibrate(controller, 1.0, 200);
+                    checkCompletion();
+                } else {
+                    state.selectedObject.position.copy(state.selectedObject.userData.initialPos);
+                    vibrate(controller, 0.2, 50);
+                }
+                state.selectedObject = null;
+            }
+        }
+        
+        function setupVRControllers() {
+            controller1 = renderer.xr.getController(0);
+            controller1.name = 'controller1';
+            controller1.addEventListener('selectstart', onSelectStart);
+            controller1.addEventListener('selectend', onSelectEnd);
+            controller1.addEventListener('squeeze', onSqueeze);
+            playerRig.add(controller1);
+
+            controller2 = renderer.xr.getController(1);
+            controller2.name = 'controller2';
+            controller2.addEventListener('selectstart', onSelectStart);
+            controller2.addEventListener('selectend', onSelectEnd);
+            controller2.addEventListener('squeeze', onSqueeze);
+            playerRig.add(controller2);
+
+            controllerGrip1 = renderer.xr.getControllerGrip(0);
+            playerRig.add(controllerGrip1);
+            controllerGrip2 = renderer.xr.getControllerGrip(1);
+            playerRig.add(controllerGrip2);
+
+            const lineGeometry = new THREE.BufferGeometry().setFromPoints([ new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -1) ]);
+            const lineMaterial1 = new THREE.LineBasicMaterial({ color: 0x00ff00 });
+            const line1 = new THREE.Line(lineGeometry, lineMaterial1);
+            line1.scale.z = 50;
+            controller1.add(line1);
+            controllerStates.controller1.line = line1;
+            const lineMaterial2 = new THREE.LineBasicMaterial({ color: 0x00ff00 });
+            const line2 = new THREE.Line(lineGeometry, lineMaterial2);
+            line2.scale.z = 50;
+            controller2.add(line2);
+            controllerStates.controller2.line = line2;
+            const controllerGeometry = new THREE.BoxGeometry(0.05, 0.05, 0.1);
+            const controllerMaterial = new THREE.MeshStandardMaterial({ color: 0x444444 });
+            const controllerMesh1 = new THREE.Mesh(controllerGeometry, controllerMaterial);
+            controllerGrip1.add(controllerMesh1);
+            const controllerMesh2 = new THREE.Mesh(controllerGeometry, controllerMaterial);
+            controllerGrip2.add(controllerMesh2);
+        }
+
+        function vibrate(controller, intensity = 0.5, duration = 100) {
+            const source = controller.userData.inputSource;
+            if (source && source.gamepad && source.gamepad.hapticActuators && source.gamepad.hapticActuators.length > 0) {
+                source.gamepad.hapticActuators[0].pulse(intensity, duration);
+            }
+        }
+        
+        async function getBoneFunFact(boneName) {
+            const apiKey = "";
+            if (!apiKey) {
+                return "（教學模式）此裝置未設定 API 金鑰，暫不使用雲端查詢。";
+            }
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+            const systemPrompt = "你是個風趣的生物學助理，你的目標是提供關於人體的迷人且具教育意義的知識。";
+            const userQuery = `請用繁體中文，提供一個關於人體「${boneName}」的有趣、深入或令人驚訝的知識點或事實。內容需適合對生物學有基本興趣的學生。請直接回答事實，不要加上任何開頭問候語，例如「好的，這是一個...」。長度控制在 100 字以內。`;
+            const payload = {
+                systemInstruction: { parts: [{ text: systemPrompt }] },
+                contents: [{ parts: [{ text: userQuery }] }],
+            };
+            try {
+                const response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                if (!response.ok) throw new Error(`API call failed with status: ${response.status}`);
+                const result = await response.json();
+                const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
+                return text || "抱歉，我現在無法提供更多資訊。";
+            } catch (error) {
+                console.error("Error fetching from Gemini API:", error);
+                return "取得資訊時發生錯誤，請稍後再試。";
+            }
+        }
+        
+        async function speakText(text) {
+            if (isSpeaking || !text) return;
+            isSpeaking = true;
+            speakButton.disabled = true;
+            if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const apiKey = "";
+             if (!apiKey) {
+                console.warn("TTS API key is not set. Skipping audio playback.");
+                isSpeaking = false;
+                speakButton.disabled = false;
+                return;
+            }
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${apiKey}`;
+            const payload = {
+                model: "gemini-2.5-flash-preview-tts",
+                contents: [{ parts: [{ text }] }],
+                generationConfig: {
+                    responseModalities: ["AUDIO"],
+                    speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: "Sadaltager" } } }
+                }
+            };
+            try {
+                const response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                const result = await response.json();
+                const audioData = result.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+                if (audioData) {
+                    const pcmData = base64ToArrayBuffer(audioData);
+                    const pcm16 = new Int16Array(pcmData);
+                    const wavBlob = pcmToWav(pcm16, 24000);
+                    const audioUrl = URL.createObjectURL(wavBlob);
+                    const audio = new Audio(audioUrl);
+                    audio.play();
+                    audio.onended = () => { isSpeaking = false; speakButton.disabled = false; };
+                } else { throw new Error("No audio data received."); }
+            } catch (error) {
+                console.error("Error with TTS API:", error);
+                isSpeaking = false;
+                speakButton.disabled = false;
+            }
+        }
+        
+        function base64ToArrayBuffer(base64) {
+            const binaryString = window.atob(base64);
+            const len = binaryString.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) { bytes[i] = binaryString.charCodeAt(i); }
+            return bytes.buffer;
+        }
+        function pcmToWav(pcmData, sampleRate) {
+            const header = new ArrayBuffer(44);
+            const view = new DataView(header);
+            writeString(view, 0, 'RIFF');
+            view.setUint32(4, 36 + pcmData.length * 2, true);
+            writeString(view, 8, 'WAVE');
+            writeString(view, 12, 'fmt ');
+            view.setUint32(16, 16, true);
+            view.setUint16(20, 1, true); view.setUint16(22, 1, true);
+            view.setUint32(24, sampleRate, true);
+            view.setUint32(28, sampleRate * 2, true);
+            view.setUint16(32, 2, true); view.setUint16(34, 16, true);
+            writeString(view, 36, 'data');
+            view.setUint32(40, pcmData.length * 2, true);
+            const wav = new Int16Array(44 / 2 + pcmData.length);
+            wav.set(new Int16Array(header, 0, 44 / 2));
+            wav.set(pcmData, 44 / 2);
+            return new Blob([wav], { type: 'audio/wav' });
+        }
+        function writeString(view, offset, string) {
+            for (let i = 0; i < string.length; i++) { view.setUint8(offset + i, string.charCodeAt(i)); }
+        }
+
+        geminiButton.addEventListener('click', async () => {
+            if (isGenerating || !lastHoveredBoneName) return;
+             const apiKey = ""; 
+            if (!apiKey) {
+                boneDescriptionText.textContent = "（教學模式）此裝置未設定 API 金鑰，暫不使用雲端查詢。";
+                speakText("此裝置未設定 API 金鑰，暫不使用雲端查詢。");
+                return;
+            }
+            isGenerating = true;
+            geminiButton.disabled = true;
+            geminiButton.innerHTML = '<div class="loader"></div> 正在生成...';
+            const fact = await getBoneFunFact(lastHoveredBoneName);
+            boneDescriptionText.textContent = fact;
+            isGenerating = false;
+            geminiButton.disabled = false;
+            geminiButton.innerHTML = '✨ 深入了解 (AI)';
+            speakText(fact);
+        });
+
+        speakButton.addEventListener('click', () => {
+             const textToSpeak = boneDescriptionText.textContent;
+             if(textToSpeak) speakText(textToSpeak);
+        });
+
+        function getIntersections(controller) {
+            const tempMatrix = new THREE.Matrix4();
+            tempMatrix.identity().extractRotation(controller.matrixWorld);
+            raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
+            raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
+            return raycaster.intersectObjects(draggableObjects, true);
+        }
+        function modelLoaded() {
+            modelsToLoad--;
+            if (modelsToLoad <= 0) {
+                loadingOverlay.style.display = 'none';
+            }
+        }
+
+        function loadFullSkeletonReference() {
+             modelsToLoad++;
+            const loader = new STLLoader();
+            loader.load('https://cdn.jsdelivr.net/gh/gp01002-code/Skeleton-/untitled.stl', 
+                (geometry) => {
+                    const material = new THREE.MeshStandardMaterial({ color: 0x00ffff, transparent: true, opacity: 0.25, emissive: new THREE.Color(0x00ffff), emissiveIntensity: 0.1 });
+                    geometry.computeBoundingBox();
+                    const center = geometry.boundingBox.getCenter(new THREE.Vector3());
+                    geometry.translate(-center.x, -center.y, -center.z);
+                    const mesh = new THREE.Mesh(geometry, material);
+                    mesh.scale.set(0.35 * sceneScaleFactor, 0.35 * sceneScaleFactor, 0.35 * sceneScaleFactor);
+                    mesh.position.copy(referencePosition); 
+                    mesh.rotation.x = -Math.PI / 2;
+                    scene.add(mesh);
+                    modelLoaded();
+                }, 
+                undefined, 
+                (error) => { 
+                    console.error("無法載入完整骨架參考模型", error);
+                    modelLoaded(); 
+                }
+            );
+        }
+        function createBones() {
+            const stlLoader = new STLLoader();
+            boneDefinitions.forEach(def => {
+                modelsToLoad++;
+                const url = def.modelUrl.replace(/ /g, '%20');
+                stlLoader.load(url, 
+                    (geometry) => {
+                        const material = new THREE.MeshStandardMaterial({ color: 0xebe5d1, roughness: 0.3, metalness: 0.1, emissive: new THREE.Color(0x000000) });
+                        geometry.computeBoundingBox();
+                        const center = geometry.boundingBox.getCenter(new THREE.Vector3());
+                        geometry.translate(-center.x, -center.y, -center.z);
+                        const mesh = new THREE.Mesh(geometry, material);
+                        mesh.scale.set(def.scale, def.scale, def.scale);
+                        mesh.rotation.x = -Math.PI / 2;
+                        mesh.castShadow = true;
+                        mesh.receiveShadow = true;
+                        setupBone(mesh, def);
+                        modelLoaded();
+                    }, 
+                    undefined, 
+                    (error) => { 
+                        console.error(`無法載入模型: ${def.id}`, error);
+                        modelLoaded();
+                    }
+                );
+            });
+        }
+        function setupBone(mesh, def) {
+            mesh.position.copy(def.initialPos);
+            mesh.userData = { id: def.id, name: def.name, type: 'draggable', placed: false, initialPos: def.initialPos.clone(), targetPos: def.targetPos, description: def.description };
+            scene.add(mesh);
+            draggableObjects.push(mesh);
+            bonesData.push(mesh);
+        }
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+        function updatePointerPosition(event) {
+            const pointer = event.touches ? event.touches[0] : event;
+            mouse.x = (pointer.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(pointer.clientY / window.innerHeight) * 2 + 1;
+        }
+
+        function onPointerDown(event) {
+            if (renderer.xr.isPresenting) return;
+            if (event.touches) event.preventDefault();
+            if (!startTime) startTimer();
+            updatePointerPosition(event);
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(draggableObjects, true);
+            if (intersects.length > 0) {
+                let object = intersects[0].object;
+                while (object.parent && !object.userData.type) object = object.parent;
+                if (object.userData.type === 'draggable' && !object.userData.placed) {
+                    selectedObject = object;
+                    controls.enabled = false;
+                    if (selectedObject.material) {
+                        selectedObject.userData.originalColor = selectedObject.material.color.getHex();
+                        selectedObject.material.color.set(0xffff00);
+                    }
+                }
+            }
+        }
+
+        function onPointerMove(event) {
+            if (renderer.xr.isPresenting) return;
+            if (event.touches) event.preventDefault();
+            updatePointerPosition(event);
+            let foundBone = null;
+            if (selectedObject) {
+                const planeNormal = new THREE.Vector3();
+                camera.getWorldDirection(planeNormal).normalize();
+                const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(planeNormal, referencePosition);
+                const ndc = new THREE.Vector3(mouse.x, mouse.y, 0.5);
+                ndc.unproject(camera);
+                const rayDir = ndc.sub(camera.position).normalize();
+                const ray = new THREE.Ray(camera.getWorldPosition(new THREE.Vector3()), rayDir);
+                const hit = new THREE.Vector3();
+                if (ray.intersectPlane(plane, hit)) {
+                    selectedObject.position.copy(hit);
+                }
+                foundBone = selectedObject.userData;
+            } else {
+                raycaster.setFromCamera(mouse, camera);
+                const intersects = raycaster.intersectObjects(draggableObjects, true);
+                draggableObjects.forEach(obj => {
+                    if (obj.material && !obj.userData.placed) obj.material.emissive.set(0x000000);
+                });
+                if (intersects.length > 0) {
+                    let object = intersects[0].object;
+                    while (object.parent && !object.userData.type) object = object.parent;
+                    if (object.userData.name && !object.userData.placed) {
+                        foundBone = object.userData;
+                        if (object.material) {
+                            object.material.emissive.set(0xffffff);
+                            object.material.emissiveIntensity = 0.1;
+                        }
+                    }
+                }
+            }
+            if (foundBone) {
+                lastHoveredBoneName = foundBone.name;
+                boneNameText.textContent = foundBone.name;
+                boneDescriptionText.textContent = foundBone.description;
+                geminiButton.style.display = 'flex';
+                speakButton.style.display = 'block';
+            } else {
+                lastHoveredBoneName = null;
+                boneNameText.textContent = '';
+                boneDescriptionText.textContent = '將滑鼠或控制器指向一塊骨骼以查看資訊。';
+                geminiButton.style.display = 'none';
+                speakButton.style.display = 'none';
+            }
+        }
+
+        function onPointerUp(event) {
+             if (renderer.xr.isPresenting) return;
+            if (selectedObject) {
+                if (selectedObject.material && selectedObject.userData.originalColor) {
+                    selectedObject.material.color.setHex(selectedObject.userData.originalColor);
+                    delete selectedObject.userData.originalColor;
+                }
+                const targetPos = selectedObject.userData.targetPos;
+                const distance = selectedObject.position.distanceTo(targetPos);
+                if (distance < snapDistance) {
+                    selectedObject.position.copy(targetPos);
+                    selectedObject.userData.placed = true;
+                    if (selectedObject.material) {
+                        selectedObject.material.color.set(0x50c878);
+                        selectedObject.material.emissive.set(0x50c878);
+                        selectedObject.material.emissiveIntensity = 0.2;
+                    }
+                    placedCount++;
+                    updatePlacedCount();
+                    checkCompletion();
+                } else {
+                    selectedObject.position.copy(selectedObject.userData.initialPos);
+                }
+            }
+            selectedObject = null;
+            controls.enabled = true;
+        }
+        
+        function updatePlacedCount() {
+            if(placedCountText) placedCountText.textContent = `已放置: ${placedCount}/12`;
+        }
+        function checkCompletion() {
+            if (placedCount >= boneDefinitions.length) {
+                stopTimer();
+                completionMessage.style.display = 'flex';
+                if (renderer.xr.isPresenting) {
+                    const finalTime = timerText.textContent;
+                    updateVRCompletionPanel(finalTime);
+                    if (controller1) vibrate(controller1, 1.0, 500);
+                    if (controller2) vibrate(controller2, 1.0, 500);
+                }
+                animateCompletion();
+            }
+        }
+        function animateCompletion() {
+            let glowIntensity = 0;
+            let increasing = true;
+            const glowAnimation = setInterval(() => {
+                if (increasing) {
+                    glowIntensity += 0.02;
+                    if (glowIntensity >= 0.5) increasing = false;
+                } else {
+                    glowIntensity -= 0.02;
+                    if (glowIntensity <= 0) { clearInterval(glowAnimation); return; }
+                }
+                draggableObjects.forEach(obj => {
+                    if (obj.material) obj.material.emissiveIntensity = glowIntensity;
+                });
+            }, 50);
+        }
+        function startTimer() { startTime = Date.now(); timerInterval = setInterval(updateTimerDisplay, 1000); }
+        function stopTimer() { clearInterval(timerInterval); }
+        function resetTimer() {
+            stopTimer();
+            startTime = null;
+            timerText.textContent = "時間: 00:00";
+        }
+        function updateTimerDisplay() {
+            if (!startTime) return;
+            const elapsedTime = Math.floor((Date.now() - startTime) / 1000);
+            const minutes = Math.floor(elapsedTime / 60).toString().padStart(2, '0');
+            const seconds = (elapsedTime % 60).toString().padStart(2, '0');
+            const timeString = `時間: ${minutes}:${seconds}`;
+            timerText.textContent = timeString;
+        }
+        function resetGame() {
+            completionMessage.style.display = 'none';
+            if(vrCompletionPanel) vrCompletionPanel.visible = false;
+            if(vrInfoPanel) vrInfoPanel.visible = renderer.xr.isPresenting;
+            resetTimer();
+            placedCount = 0;
+            updatePlacedCount();
+            boneNameText.textContent = '指向一塊骨骼以查看資訊。';
+
+            Object.keys(controllerStates).forEach(key => {
+                const state = controllerStates[key];
+                state.intersectedObject = null;
+                state.selectedObject = null;
+                if (state.line && state.line.material) state.line.material.color.set(0x00ff00);
+            });
+            bonesData.forEach(bone => {
+                bone.userData.placed = false;
+                bone.position.copy(bone.userData.initialPos);
+                if (bone.material) {
+                    bone.material.color.set(0xebe5d1);
+                    bone.material.emissive.set(0x000000);
+                    bone.material.emissiveIntensity = 0;
+                }
+            });
+        }
+        
+        function handleController(controller, controllerName) {
+            if (!controller) return;
+            const state = controllerStates[controllerName];
+            if (state.selectedObject) return;
+            const intersections = getIntersections(controller);
+            const line = state.line;
+            let foundBone = null;
+            if (intersections.length > 0) {
+                let object = intersections[0].object;
+                while (object.parent && !object.userData.type) object = object.parent;
+                if (object.userData.type === 'draggable' && !object.userData.placed) {
+                    const otherControllerName = controllerName === 'controller1' ? 'controller2' : 'controller1';
+                    const otherState = controllerStates[otherControllerName];
+                    if (otherState.selectedObject === object) {
+                        if (line && line.material) line.material.color.set(0xff0000);
+                    } else {
+                        foundBone = object;
+                        if (line && line.material) line.material.color.set(0xffff00);
+                    }
+                } else {
+                    if (line && line.material) line.material.color.set(0xff0000);
+                }
+            } else {
+                if (line && line.material) line.material.color.set(0x00ff00);
+            }
+            if (state.intersectedObject !== foundBone) {
+                if (state.intersectedObject && state.intersectedObject.material) {
+                    state.intersectedObject.material.emissive.set(0x000000);
+                }
+                state.intersectedObject = foundBone;
+                if (foundBone && foundBone.material) {
+                    foundBone.material.emissive.set(0xffffff);
+                    foundBone.material.emissiveIntensity = 0.2;
+                }
+            }
+        }
+
+        function handleVRLocomotion(delta) {
+            const xrCamera = renderer.xr.getCamera();
+            if (!playerRig) return;
+            if (controller1 && controller1.userData && controller1.userData.inputSource) {
+                const leftSource = controller1.userData.inputSource;
+                if (leftSource.gamepad && leftSource.gamepad.axes && leftSource.gamepad.axes.length > 3) {
+                    const axes = leftSource.gamepad.axes;
+                    const moveZ = Math.abs(axes[3]) > 0.1 ? axes[3] : 0;
+                    const moveX = Math.abs(axes[2]) > 0.1 ? axes[2] : 0;
+                    if (moveZ !== 0 || moveX !== 0) {
+                        const quaternion = xrCamera.quaternion;
+                        const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(quaternion);
+                        forward.y = 0; forward.normalize();
+                        const right = new THREE.Vector3(1, 0, 0).applyQuaternion(quaternion);
+                        right.y = 0; right.normalize();
+                        playerRig.position.add(forward.multiplyScalar(VR_MOVEMENT_SPEED * -moveZ * delta));
+                        playerRig.position.add(right.multiplyScalar(VR_MOVEMENT_SPEED * moveX * delta));
+                    }
+                }
+            }
+            if (controller2 && controller2.userData && controller2.userData.inputSource) {
+                const rightSource = controller2.userData.inputSource;
+                if (rightSource.gamepad && rightSource.gamepad.axes && rightSource.gamepad.axes.length > 3) {
+                    const axes = rightSource.gamepad.axes;
+                    const dolly = Math.abs(axes[3]) > 0.1 ? axes[3] : 0;
+                    if (dolly !== 0) {
+                        const dollyDirection = new THREE.Vector3();
+                        xrCamera.getWorldDirection(dollyDirection);
+                        playerRig.position.add(dollyDirection.multiplyScalar(VR_ZOOM_SPEED * -dolly * delta));
+                    }
+                }
+            }
+        }
+        
+        function updateDebugInfo(now) {
+            const debugPanel = document.getElementById('debug-panel');
+            const debugInfo = document.getElementById('debug-info');
+            if (!debugPanel || !debugInfo || debugPanel.style.display === 'none') return;
+            const delta = now - lastDebugUpdate;
+            if (delta === 0) return;
+            const fps = Math.round(1000 / delta);
+            let debugText = `FPS: ${fps}\n`;
+            debugText += `Placed: ${placedCount}/${boneDefinitions.length}\n`;
+            if (renderer.xr.isPresenting) {
+                debugText += `VR Mode: Active\n`;
+                debugText += `Player Pos: ${playerRig.position.x.toFixed(1)}, ${playerRig.position.y.toFixed(1)}, ${playerRig.position.z.toFixed(1)}\n`;
+                debugText += `C1 Intersect: ${controllerStates.controller1.intersectedObject ? controllerStates.controller1.intersectedObject.userData.name : 'None'}\n`;
+                debugText += `C2 Intersect: ${controllerStates.controller2.intersectedObject ? controllerStates.controller2.intersectedObject.userData.name : 'None'}\n`;
+            } else {
+                debugText += `VR Mode: Inactive\n`;
+            }
+            debugInfo.textContent = debugText;
+        }
+        
+        function animate() {
+            const delta = clock.getDelta();
+            if (!renderer.xr.isPresenting) {
+                controls.update();
+            }
+            const now = performance.now();
+            
+            if (renderer.xr.isPresenting) {
+                handleController(controller1, 'controller1');
+                handleController(controller2, 'controller2');
+                handleVRLocomotion(delta);
+            }
+            
+            updateDebugInfo(now);
+            lastDebugUpdate = now;
+            
+            renderer.render(scene, camera);
+        }
+
+    </script>
+</body>
+</html>
+
